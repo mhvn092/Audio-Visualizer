@@ -1,0 +1,46 @@
+//kage:unit pixels
+
+package main
+
+var Time float
+var ScreenSize vec2
+var Bass float
+var Mid float
+var Treble float
+var Onset float
+var WarpAmount float
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy / ScreenSize
+	center := vec2(0.5, 0.5)
+
+	// 1. Calculate inward/outward zoom & spiral twist on previous frame
+	dist := length(uv - center)
+	dir := vec2(0.0)
+	if dist > 0.0001 {
+		dir = (uv - center) / dist
+	}
+
+	// Zoom inward/outward driven by Bass and beat Onset
+	zoom := (0.002 + Bass*0.008 + Onset*0.012) * WarpAmount
+	twist := sin(dist*16.0-Time*3.0) * (0.004 + Mid*0.008) * WarpAmount
+
+	// Compute warped coordinate for feedback texture (Image 0)
+	warpedUV := uv - (dir * zoom) + vec2(-twist*dir.y, twist*dir.x)
+	warpedSrc0Pos := warpedUV * ScreenSize
+
+	// 2. Sample previous frame trail (Image 0) with a 95% decay trail
+	feedback := imageSrc0At(warpedSrc0Pos).rgb * 0.95
+
+	// 3. Sample active source photo (Image 1)
+	photo := imageSrc1At(srcPos).rgb
+
+	// 4. Blend new photo into feedback trail (stronger blend on beat hit)
+	blend := 0.12 + (Onset * 0.65) + (Bass * 0.2)
+	blended := mix(feedback, photo, blend)
+
+	// Add dynamic beat flash color highlight
+	beatGlow := vec3(0.9, 0.35, 1.0) * (Onset * 0.18)
+
+	return vec4(blended + beatGlow, 1.0)
+}

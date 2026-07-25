@@ -1,0 +1,209 @@
+//kage:unit pixels
+
+package main
+
+var Time float
+var ScreenSize vec2
+var Bass float
+var Mid float
+var Treble float
+var Onset float
+var HueOffset float
+var GeoMode float
+var SmoothedBass float
+var SmoothedMid float
+var SmoothedTreble float
+
+// Pseudo-noise for organic displacement
+func hash(p vec2) float {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
+}
+
+func noise(p vec3) float {
+	a := sin(p.x*1.1 + p.y*2.3 + p.z*0.7)
+	b := sin(p.y*1.7 - p.x*0.9 + p.z*1.3)
+	c := sin(p.z*2.1 + p.x*1.5 - p.y*0.5)
+	return (a + b + c) * 0.333
+}
+
+// Smooth minimum for organic shape blending
+func smin(a float, b float, k float) float {
+	h := clamp(0.5+0.5*(b-a)/k, 0.0, 1.0)
+	return mix(b, a, h) - k*h*(1.0-h)
+}
+
+// Torus SDF
+func sdTorus(p vec3, R float, r float) float {
+	q := vec2(length(vec2(p.x, p.z)) - R, p.y)
+	return length(q) - r
+}
+
+// Sphere SDF
+func sdSphere(p vec3, r float) float {
+	return length(p) - r
+}
+
+// Rounded Box SDF
+func sdRoundBox(p vec3, b vec3, r float) float {
+	q := vec3(abs(p.x)-b.x, abs(p.y)-b.y, abs(p.z)-b.z)
+	return length(vec3(max(q.x, 0.0), max(q.y, 0.0), max(q.z, 0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - r
+}
+
+// The scene: organic morphing geometry that breathes with music
+func mapScene(p vec3) float {
+	// Slow organic rotation of the coordinate space
+	slowTime := Time * 0.4
+	sa := sin(slowTime * 0.7)
+	ca := cos(slowTime * 0.7)
+	rp := vec3(p.x*ca - p.z*sa, p.y, p.x*sa + p.z*ca)
+
+	// Secondary rotation on Y axis driven by mid
+	sb := sin(slowTime * 0.3 + SmoothedMid * 0.5)
+	cb := cos(slowTime * 0.3 + SmoothedMid * 0.5)
+	rp = vec3(rp.x, rp.y*cb - rp.z*sb, rp.y*sb + rp.z*cb)
+
+	// Organic noise displacement — the key to making it feel alive
+	disp := noise(rp*3.0 + vec3(Time*0.8, Time*0.6, Time*0.7)) * (0.08 + SmoothedBass*0.25)
+	disp += noise(rp*6.0 - vec3(Time*1.2, Time*0.4, Time*0.9)) * (0.02 + SmoothedTreble*0.08)
+
+	// Core shapes that smoothly morph between each other
+	torusR := 0.7 + SmoothedBass * 0.3
+	torusMinor := 0.18 + SmoothedMid * 0.08
+	dTorus := sdTorus(rp, torusR, torusMinor)
+
+	// Inner floating sphere that pulses with bass
+	sphereR := 0.25 + SmoothedBass * 0.35
+	dSphere := sdSphere(rp, sphereR)
+
+	// Orbiting smaller spheres (satellites) driven by treble
+	sat1 := vec3(sin(Time*0.9)*1.2, cos(Time*0.7)*0.4, cos(Time*0.9)*1.2)
+	sat2 := vec3(sin(Time*0.9+2.094)*1.2, cos(Time*0.7+2.094)*0.4, cos(Time*0.9+2.094)*1.2)
+	sat3 := vec3(sin(Time*0.9+4.189)*1.2, cos(Time*0.7+4.189)*0.4, cos(Time*0.9+4.189)*1.2)
+	satR := 0.08 + SmoothedTreble * 0.06
+	dSat1 := sdSphere(rp-sat1, satR)
+	dSat2 := sdSphere(rp-sat2, satR)
+	dSat3 := sdSphere(rp-sat3, satR)
+
+	// Smooth blend all shapes together with organic smin
+	blendK := 0.4 + SmoothedBass * 0.6
+	d := smin(dTorus, dSphere, blendK)
+	d = smin(d, dSat1, 0.3)
+	d = smin(d, dSat2, 0.3)
+	d = smin(d, dSat3, 0.3)
+
+	return d + disp
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := (dstPos.xy - 0.5*ScreenSize) / ScreenSize.y
+
+	// Smooth orbiting camera
+	camAngle := Time * 0.15
+	camRadius := 3.8 - SmoothedBass*0.4
+	camHeight := sin(Time*0.1) * 0.8
+
+	ro := vec3(sin(camAngle)*camRadius, camHeight, cos(camAngle)*camRadius)
+	target := vec3(0.0)
+	forward := normalize(target - ro)
+	right := normalize(vec3(forward.z, 0.0, -forward.x))
+	up := cross(forward, right)
+	rd := normalize(forward*1.6 + right*uv.x + up*uv.y)
+
+	// Raymarching
+	t := 0.0
+	minDist := 100.0
+	totalDist := 0.0
+	var p vec3
+
+	for i := 0; i < 80; i++ {
+		p = ro + rd*t
+		d := mapScene(p)
+		if d < minDist {
+			minDist = d
+		}
+		if d < 0.001 {
+			break
+		}
+		if t > 20.0 {
+			break
+		}
+		t += d * 0.6
+	}
+	totalDist = t
+
+	// Track-specific base palette
+	baseHue := HueOffset * 6.28
+	palette1 := vec3(0.5+0.5*sin(baseHue), 0.5+0.5*sin(baseHue+2.1), 0.5+0.5*sin(baseHue+4.2))
+	palette2 := vec3(0.5+0.5*cos(baseHue+1.0), 0.5+0.5*cos(baseHue+3.1), 0.5+0.5*cos(baseHue+5.2))
+
+	// Base image UV with audio-reactive liquid ripple effect
+	screenNormUV := dstPos.xy / ScreenSize
+	warpOffset := vec2(
+		sin(screenNormUV.y*12.0+Time*1.5)*0.008*(1.0+SmoothedBass*3.0),
+		cos(screenNormUV.x*12.0+Time*1.5)*0.008*(1.0+SmoothedBass*3.0),
+	)
+	bgTexColor := imageSrc0At((screenNormUV + warpOffset) * ScreenSize).rgb
+
+	// Mood-graded background combining track artwork + deep atmosphere
+	bgGraded := mix(bgTexColor*0.45, bgTexColor*palette1*0.8, 0.5)
+
+	// Start with atmospheric background
+	col := bgGraded
+
+	// Volumetric glow aura — breathes with bass energy
+	glowStrength := 0.02 / (minDist*minDist + 0.015)
+	glowColor := mix(palette1, palette2, sin(Time*0.3)*0.5+0.5) * (0.8 + SmoothedBass*1.2)
+	col += glowColor * glowStrength
+
+	// Surface shading for 3D GPU geometry
+	if totalDist < 20.0 && minDist < 0.01 {
+		eps := 0.002
+		nx := mapScene(vec3(p.x+eps, p.y, p.z)) - mapScene(vec3(p.x-eps, p.y, p.z))
+		ny := mapScene(vec3(p.x, p.y+eps, p.z)) - mapScene(vec3(p.x, p.y-eps, p.z))
+		nz := mapScene(vec3(p.x, p.y, p.z+eps)) - mapScene(vec3(p.x, p.y, p.z-eps))
+		n := normalize(vec3(nx, ny, nz))
+
+		// Two-point lighting for dramatic depth
+		light1 := normalize(vec3(0.6, 0.8, -0.5))
+		light2 := normalize(vec3(-0.5, -0.3, 0.7))
+
+		diff1 := max(dot(n, light1), 0.0)
+		diff2 := max(dot(n, light2), 0.0) * 0.3
+		spec := pow(max(dot(reflect(rd, n), light1), 0.0), 64.0)
+
+		// Fresnel rim lighting — glowing edge look
+		fresnel := pow(1.0 - abs(dot(rd, n)), 3.5)
+
+		// Environment refraction/reflection of the track artwork
+		reflUV := (n.xy*0.5 + vec2(0.5)) * ScreenSize
+		envCol := imageSrc0At(reflUV).rgb
+
+		// Combine: metallic surface + artwork reflection + fresnel rim
+		surfCol := palette1 * (diff1*0.4 + diff2*0.2 + 0.1)
+		surfCol += palette2 * fresnel * (0.8 + SmoothedTreble*1.2)
+		surfCol += envCol * (0.5 + fresnel*0.4)
+		surfCol += vec3(spec) * 0.6
+
+		// Ambient occlusion
+		ao := 1.0 - clamp(minDist*8.0, 0.0, 0.5)
+		surfCol *= (1.0 - ao*0.35)
+
+		// Fog blend between background artwork and 3D surface
+		fogFactor := 1.0 / (1.0 + totalDist*totalDist*0.006)
+		col = mix(bgGraded*0.3, surfCol, fogFactor)
+	}
+
+	// Beat flash pulse
+	beatPulse := palette2 * (Onset * 0.25)
+	col += beatPulse
+
+	// Vignette for cinematic framing
+	vignette := 1.0 - length(uv) * 0.55
+	col *= clamp(vignette, 0.0, 1.0)
+
+	// Film grain
+	grain := hash(dstPos.xy + vec2(Time*100.0)) * 0.015
+	col += vec3(grain)
+
+	return vec4(col, 1.0)
+}

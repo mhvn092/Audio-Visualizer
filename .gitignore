@@ -1,0 +1,15 @@
+# Binary executables
+*.exe
+*.exe.stackdump
+visualizer
+visualizer.exe
+
+# Build & OS artifacts
+.DS_Store
+Thumbs.db
+*.log
+
+# Dynamically downloaded/generated track assets
+assets/track_*.jpg
+assets/track_*.jpeg
+assets/track_*.png
