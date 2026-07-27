@@ -5,9 +5,7 @@ import (
 	"image"
 	"image/color"
 	_ "image/jpeg"
-	"image/png"
 	_ "image/png"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +17,7 @@ import (
 type TextureLibrary struct {
 	mu          sync.Mutex
 	Textures    []*ebiten.Image
+	Features    []ArtFeatures
 	Names       []string
 	Current     int
 	Next        int
@@ -28,13 +27,14 @@ type TextureLibrary struct {
 func NewTextureLibrary() (*TextureLibrary, error) {
 	lib := &TextureLibrary{
 		Textures:    make([]*ebiten.Image, 0),
+		Features:    make([]ArtFeatures, 0),
 		Names:       make([]string, 0),
 		scaledCache: make(map[string]*ebiten.Image),
 	}
 
 	os.MkdirAll("assets", 0755)
 
-	// Scan assets directory for png, jpg, and jpeg files
+	// Scan assets directory for existing user artwork (png, jpg, jpeg)
 	entries, err := os.ReadDir("assets")
 	if err == nil {
 		for _, entry := range entries {
@@ -44,34 +44,28 @@ func NewTextureLibrary() (*TextureLibrary, error) {
 			ext := strings.ToLower(filepath.Ext(entry.Name()))
 			if ext == ".png" || ext == ".jpg" || ext == ".jpeg" {
 				fullPath := filepath.Join("assets", entry.Name())
-				img, err := loadEbitenImage(fullPath)
+				img, feats, err := loadEbitenImageAndAnalyze(fullPath)
 				if err == nil {
 					lib.Textures = append(lib.Textures, img)
+					lib.Features = append(lib.Features, feats)
 					lib.Names = append(lib.Names, entry.Name())
 				}
 			}
 		}
 	}
 
-	// If no images found, generate default procedural art
+	// If no images are found in assets/, create an in-memory neutral placeholder texture
 	if len(lib.Textures) == 0 {
-		gen1 := generateCyberGrid(960, 540)
-		gen2 := generateCosmicNebula(960, 540)
-		saveImage("assets/cyber_grid.png", gen1)
-		saveImage("assets/cosmic_nebula.png", gen2)
-
-		if img1, err := loadEbitenImage("assets/cyber_grid.png"); err == nil {
-			lib.Textures = append(lib.Textures, img1)
-			lib.Names = append(lib.Names, "cyber_grid.png")
+		placeholder := image.NewRGBA(image.Rect(0, 0, 16, 16))
+		for y := 0; y < 16; y++ {
+			for x := 0; x < 16; x++ {
+				placeholder.Set(x, y, color.RGBA{R: 20, G: 20, B: 30, A: 255})
+			}
 		}
-		if img2, err := loadEbitenImage("assets/cosmic_nebula.png"); err == nil {
-			lib.Textures = append(lib.Textures, img2)
-			lib.Names = append(lib.Names, "cosmic_nebula.png")
-		}
-	}
-
-	if len(lib.Textures) == 0 {
-		return nil, fmt.Errorf("no valid images could be loaded from assets/")
+		eImg := ebiten.NewImageFromImage(placeholder)
+		lib.Textures = append(lib.Textures, eImg)
+		lib.Features = append(lib.Features, DefaultArtFeatures())
+		lib.Names = append(lib.Names, "default_placeholder")
 	}
 
 	lib.Current = 0
@@ -83,10 +77,19 @@ func NewTextureLibrary() (*TextureLibrary, error) {
 }
 
 func LoadSingleImage(path string) (*ebiten.Image, error) {
-	return loadEbitenImage(path)
+	img, _, err := loadEbitenImageAndAnalyze(path)
+	return img, err
+}
+
+func LoadSingleImageWithAnalysis(path string) (*ebiten.Image, ArtFeatures, error) {
+	return loadEbitenImageAndAnalyze(path)
 }
 
 func (tl *TextureLibrary) AddTextureAndActivate(img *ebiten.Image, name string) {
+	tl.AddTextureWithFeatures(img, DefaultArtFeatures(), name)
+}
+
+func (tl *TextureLibrary) AddTextureWithFeatures(img *ebiten.Image, feats ArtFeatures, name string) {
 	if img == nil {
 		return
 	}
@@ -94,6 +97,7 @@ func (tl *TextureLibrary) AddTextureAndActivate(img *ebiten.Image, name string) 
 	defer tl.mu.Unlock()
 
 	tl.Textures = append(tl.Textures, img)
+	tl.Features = append(tl.Features, feats)
 	tl.Names = append(tl.Names, filepath.Base(name))
 
 	// Immediately activate the newly added texture
@@ -103,6 +107,16 @@ func (tl *TextureLibrary) AddTextureAndActivate(img *ebiten.Image, name string) 
 
 	// Clear cache to prevent stale scaled textures
 	tl.scaledCache = make(map[string]*ebiten.Image)
+}
+
+func (tl *TextureLibrary) GetCurrentFeatures() ArtFeatures {
+	tl.mu.Lock()
+	defer tl.mu.Unlock()
+
+	if len(tl.Features) == 0 || tl.Current < 0 || tl.Current >= len(tl.Features) {
+		return DefaultArtFeatures()
+	}
+	return tl.Features[tl.Current]
 }
 
 func (tl *TextureLibrary) SwitchOnBeat() {
@@ -153,71 +167,19 @@ func (tl *TextureLibrary) GetNextResized(targetW, targetH int) *ebiten.Image {
 	return tl.GetResizedTexture(tl.Next, targetW, targetH)
 }
 
-func loadEbitenImage(path string) (*ebiten.Image, error) {
+func loadEbitenImageAndAnalyze(path string) (*ebiten.Image, ArtFeatures, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, DefaultArtFeatures(), err
 	}
 	defer f.Close()
 
 	img, _, err := image.Decode(f)
 	if err != nil {
-		return nil, err
+		return nil, DefaultArtFeatures(), err
 	}
-	return ebiten.NewImageFromImage(img), nil
-}
 
-func saveImage(path string, img image.Image) {
-	f, err := os.Create(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	png.Encode(f, img)
-}
-
-func generateCyberGrid(w, h int) image.Image {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			nx := float64(x) / float64(w)
-			ny := float64(y) / float64(h)
-
-			grid := math.Mod(nx*24.0, 1.0) < 0.07 || math.Mod(ny*18.0, 1.0) < 0.07
-			dist := math.Hypot(nx-0.5, ny-0.5)
-
-			r := uint8(math.Min(255, (1.0-dist)*180+50))
-			g := uint8(0)
-			b := uint8(math.Min(255, dist*220+80))
-
-			if grid {
-				r = 255
-				g = 100
-				b = 255
-			}
-			img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
-		}
-	}
-	return img
-}
-
-func generateCosmicNebula(w, h int) image.Image {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
-			nx := float64(x)/float64(w) - 0.5
-			ny := float64(y)/float64(h) - 0.5
-
-			angle := math.Atan2(ny, nx)
-			radius := math.Hypot(nx, ny)
-
-			val := math.Sin(angle*5.0 + radius*12.0)
-			r := uint8(math.Min(255, (val+1.0)*100+20))
-			g := uint8(math.Min(255, (math.Cos(radius*15.0)+1.0)*120))
-			b := uint8(math.Min(255, (1.0-radius)*255))
-
-			img.Set(x, y, color.RGBA{R: r, G: g, B: b, A: 255})
-		}
-	}
-	return img
+	feats := AnalyzeArtwork(img)
+	eImg := ebiten.NewImageFromImage(img)
+	return eImg, feats, nil
 }

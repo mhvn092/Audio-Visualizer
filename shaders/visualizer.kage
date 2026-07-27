@@ -13,197 +13,373 @@ var GeoMode float
 var SmoothedBass float
 var SmoothedMid float
 var SmoothedTreble float
+var BPM float
+var BeatPhase float
+var BarCount float
+var ActBlend float  // 0=Monolith 1=Organism 2=Constellation
+var Evolution float // Cumulative energy — different value at min 5 vs min 30
 
-// Pseudo-noise for organic displacement
+// Extracted Album Art Features
+var ArtColor1 vec3
+var ArtColor2 vec3
+var ArtColor3 vec3
+var ArtBrightness float
+var ArtWarmth float
+var ArtComplexity float
+var ArtContrast float
+
+// ═══════════════════════════════════════════════════════
 func hash(p vec2) float {
 	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
 }
-
-func noise(p vec3) float {
-	a := sin(p.x*1.1 + p.y*2.3 + p.z*0.7)
-	b := sin(p.y*1.7 - p.x*0.9 + p.z*1.3)
-	c := sin(p.z*2.1 + p.x*1.5 - p.y*0.5)
-	return (a + b + c) * 0.333
+func hash1(n float) float {
+	return fract(sin(n) * 43758.5453)
 }
 
-// Smooth minimum for organic shape blending
+func vnoise(p vec3) float {
+	ip := vec3(floor(p.x), floor(p.y), floor(p.z))
+	fp := vec3(fract(p.x), fract(p.y), fract(p.z))
+	fp = fp * fp * (vec3(3.0) - 2.0*fp)
+	n := ip.x + ip.y*157.0 + ip.z*113.0
+	return mix(
+		mix(mix(hash1(n), hash1(n+1.0), fp.x),
+			mix(hash1(n+157.0), hash1(n+158.0), fp.x), fp.y),
+		mix(mix(hash1(n+113.0), hash1(n+114.0), fp.x),
+			mix(hash1(n+270.0), hash1(n+271.0), fp.x), fp.y),
+		fp.z)
+}
+
 func smin(a float, b float, k float) float {
 	h := clamp(0.5+0.5*(b-a)/k, 0.0, 1.0)
 	return mix(b, a, h) - k*h*(1.0-h)
 }
-
-// Torus SDF
-func sdTorus(p vec3, R float, r float) float {
-	q := vec2(length(vec2(p.x, p.z)) - R, p.y)
-	return length(q) - r
+func smax(a float, b float, k float) float {
+	return -smin(-a, -b, k)
 }
 
-// Sphere SDF
-func sdSphere(p vec3, r float) float {
-	return length(p) - r
-}
+// ═══════════════════════════════════════════════════════
+// ACT I — MONOLITH (bass-dominant, evolves over time)
+// ═══════════════════════════════════════════════════════
 
-// Rounded Box SDF
-func sdRoundBox(p vec3, b vec3, r float) float {
+func sdBox(p vec3, b vec3) float {
 	q := vec3(abs(p.x)-b.x, abs(p.y)-b.y, abs(p.z)-b.z)
-	return length(vec3(max(q.x, 0.0), max(q.y, 0.0), max(q.z, 0.0))) + min(max(q.x, max(q.y, q.z)), 0.0) - r
+	return length(vec3(max(q.x, 0.0), max(q.y, 0.0), max(q.z, 0.0))) + min(max(q.x, max(q.y, q.z)), 0.0)
 }
 
-// The scene: organic morphing geometry that breathes with music
+func actMonolith(p vec3) float {
+	st := Time * 0.15
+	evo := Evolution * 3.0
+
+	sa := sin(st*0.3 + evo*0.1)
+	ca := cos(st*0.3 + evo*0.1)
+	p = vec3(p.x*ca-p.z*sa, p.y, p.x*sa+p.z*ca)
+
+	wx := 0.4 + 0.15*sin(evo*0.7)
+	wy := 1.4 + 0.4*sin(evo*0.3) + SmoothedBass*0.3
+	wz := 0.4 + 0.15*cos(evo*0.5)
+	pillar := sdBox(p, vec3(wx, wy, wz))
+
+	twist := (evo*0.15 + SmoothedMid*0.2) * p.y * 0.25
+	tp := vec3(p.x*cos(twist)-p.z*sin(twist), p.y, p.x*sin(twist)+p.z*cos(twist))
+	twistedPillar := sdBox(tp, vec3(wx, wy, wz))
+	pillar = mix(pillar, twistedPillar, clamp(sin(evo*0.4)*0.5+0.5, 0.0, 1.0))
+
+	fDepth := 0.015 + 0.015*sin(evo*0.6) + SmoothedTreble*0.015
+	fFreq := 3.0 + 2.0*sin(evo*0.2)
+	fracture := abs(p.y - sin(p.x*fFreq+st+evo)*0.15) - fDepth
+	pillar = smax(pillar, -fracture, 0.03)
+
+	shardOrbit := 1.3 + 0.4*sin(evo*0.35)
+	for i := 0; i < 4; i++ {
+		fi := float(i)
+		ang := fi*1.5708 + st*0.4 + evo*0.15
+		h := sin(st*0.3+fi*1.1+evo*0.2) * (0.6+0.3*sin(evo*0.5))
+		shardPos := vec3(sin(ang)*shardOrbit, h, cos(ang)*shardOrbit)
+		shard := sdBox(p-shardPos, vec3(0.07+0.03*sin(evo+fi), 0.18+SmoothedBass*0.05, 0.05))
+		pillar = min(pillar, shard)
+	}
+
+	pillar += vnoise(p*4.0+vec3(st*0.2)) * 0.02
+	return pillar
+}
+
+// ═══════════════════════════════════════════════════════
+// ACT II — ORGANISM (mid-dominant, evolves over time)
+// ═══════════════════════════════════════════════════════
+
+func actOrganism(p vec3) float {
+	st := Time * 0.2
+	evo := Evolution * 3.0
+
+	sa := sin(st*0.3 + evo*0.08)
+	ca := cos(st*0.3 + evo*0.08)
+	p = vec3(p.x*ca-p.z*sa, p.y, p.x*sa+p.z*ca)
+	sb := sin(st*0.15 + evo*0.05)
+	cb := cos(st*0.15 + evo*0.05)
+	p = vec3(p.x, p.y*cb-p.z*sb, p.y*sb+p.z*cb)
+
+	bellScale := 1.2 + 0.3*sin(evo*0.4)
+	bellSquash := 1.3 + 0.5*sin(evo*0.3)
+	bellP := vec3(p.x, (p.y-0.15)*bellSquash, p.z)
+	bell := length(bellP) - (0.8*bellScale/bellSquash + SmoothedBass*0.15)
+
+	cutAngle := -0.1 - 0.2*sin(evo*0.25)
+	bell = smax(bell, p.y*(-1.0)+cutAngle, 0.12)
+
+	breathFreq := 4.0 + 2.0*sin(evo*0.35)
+	bell += sin(p.x*breathFreq+st*1.5)*cos(p.z*breathFreq+st*1.2) * (0.02+SmoothedMid*0.02)
+	bell += vnoise(p*3.0+vec3(st*0.3, evo*0.1, st*0.2)) * (0.03+SmoothedBass*0.04)
+
+	innerBell := length(vec3(p.x, (p.y-0.1)*bellSquash*1.1, p.z)) - (0.65*bellScale/bellSquash + SmoothedBass*0.08)
+	bell = smax(bell, -innerBell, 0.06)
+
+	tendrilCount := 3.0 + 2.0*sin(evo*0.2)
+	tendrils := 1000.0
+	for i := 0; i < 5; i++ {
+		fi := float(i)
+		if fi >= tendrilCount {
+			break
+		}
+		ang := fi*(6.2832/tendrilCount) + st*0.15 + evo*0.1
+		radius := 0.35 + 0.15*sin(evo*0.3+fi) + sin(st*0.5+fi)*0.08
+		tx := sin(ang) * radius
+		tz := cos(ang) * radius
+		waveFreq := 5.0 + 2.0*sin(evo*0.4+fi)
+		wave := sin(p.y*waveFreq-st*2.5+fi*2.0+evo*0.2) * (0.05+SmoothedTreble*0.03)
+		tendrilXZ := length(vec2(p.x-tx-wave, p.z-tz-wave*0.6))
+		tendrilD := tendrilXZ - (0.025+SmoothedMid*0.008)
+		tendrilD = smax(tendrilD, p.y+0.05, 0.05)
+		tendrilD += max(-(p.y+1.2), 0.0) * 0.25
+		tendrils = smin(tendrils, tendrilD, 0.06)
+	}
+
+	return smin(bell, tendrils, 0.12+SmoothedBass*0.08)
+}
+
+// ═══════════════════════════════════════════════════════
+// ACT III — CONSTELLATION (treble-dominant, evolves)
+// ═══════════════════════════════════════════════════════
+
+func actConstellation(p vec3) float {
+	st := Time * 0.25
+	evo := Evolution * 3.0
+
+	sa := sin(st*0.2 + evo*0.06)
+	ca := cos(st*0.2 + evo*0.06)
+	p = vec3(p.x*ca-p.z*sa, p.y, p.x*sa+p.z*ca)
+
+	coreR := 0.25 + 0.1*sin(evo*0.3) + SmoothedBass*0.1
+	core := length(p) - coreR
+	core += vnoise(p*6.0+vec3(st, evo*0.1, st*0.5)) * 0.02
+	d := core
+
+	bodyCount := 4.0 + 2.0*sin(evo*0.25)
+	for i := 0; i < 6; i++ {
+		fi := float(i)
+		if fi >= bodyCount {
+			break
+		}
+		orbAng := st*(0.25+fi*0.07) + fi*1.047 + evo*0.05
+		orbR := 0.8 + fi*0.1 + 0.2*sin(evo*0.3+fi) + sin(st*0.15+fi)*0.1
+		inclination := fi*0.25 + sin(evo*0.2+fi)*0.3
+		si := sin(inclination)
+		ci := cos(inclination)
+		bx := sin(orbAng) * orbR
+		by := cos(orbAng) * orbR * si
+		bz := cos(orbAng) * orbR * ci
+		bodyR := 0.07 + 0.03*sin(evo*0.4+fi) + SmoothedTreble*0.02
+		body := length(p - vec3(bx, by, bz)) - bodyR
+		blendR := 0.15 + 0.1*sin(evo*0.35+fi) + SmoothedMid*0.08
+		d = smin(d, body, blendR)
+	}
+
+	return d
+}
+
+// ═══════════════════════════════════════════════════════
+// SCENE DIRECTOR with Cover Art 3D Heightfield Relief
+// ═══════════════════════════════════════════════════════
+
 func mapScene(p vec3) float {
-	// Slow organic rotation of the coordinate space
-	slowTime := Time * 0.4
-	sa := sin(slowTime * 0.7)
-	ca := cos(slowTime * 0.7)
-	rp := vec3(p.x*ca - p.z*sa, p.y, p.x*sa + p.z*ca)
+	d1 := actMonolith(p)
+	d2 := actOrganism(p)
+	d3 := actConstellation(p)
 
-	// Secondary rotation on Y axis driven by mid
-	sb := sin(slowTime * 0.3 + SmoothedMid * 0.5)
-	cb := cos(slowTime * 0.3 + SmoothedMid * 0.5)
-	rp = vec3(rp.x, rp.y*cb - rp.z*sb, rp.y*sb + rp.z*cb)
+	blend := clamp(ActBlend, 0.0, 2.0)
+	d := d1
+	if blend < 1.0 {
+		d = mix(d1, d2, blend)
+	} else {
+		d = mix(d2, d3, blend-1.0)
+	}
 
-	// Organic noise displacement — the key to making it feel alive
-	disp := noise(rp*3.0 + vec3(Time*0.8, Time*0.6, Time*0.7)) * (0.08 + SmoothedBass*0.25)
-	disp += noise(rp*6.0 - vec3(Time*1.2, Time*0.4, Time*0.9)) * (0.02 + SmoothedTreble*0.08)
+	// 3D Cover Art Heightfield Relief (Physically extrudes cover details on front/center of geometry)
+	artUV := clamp(p.xy*0.35 + vec2(0.5), vec2(0.01), vec2(0.99)) * ScreenSize
+	artTex := imageSrc0At(artUV).rgb
+	artLuma := dot(artTex, vec3(0.299, 0.587, 0.114))
 
-	// Core shapes that smoothly morph between each other
-	torusR := 0.7 + SmoothedBass * 0.3
-	torusMinor := 0.18 + SmoothedMid * 0.08
-	dTorus := sdTorus(rp, torusR, torusMinor)
+	// Strong heightfield displacement on front-facing Z geometry
+	frontMask := clamp(1.0 - abs(p.z)*0.8, 0.0, 1.0)
+	artRelief := (artLuma - 0.45) * 0.22 * frontMask * (0.6 + SmoothedBass*0.6)
 
-	// Inner floating sphere that pulses with bass
-	sphereR := 0.25 + SmoothedBass * 0.35
-	dSphere := sdSphere(rp, sphereR)
+	return d - artRelief
+}
 
-	// Orbiting smaller spheres (satellites) driven by treble
-	sat1 := vec3(sin(Time*0.9)*1.2, cos(Time*0.7)*0.4, cos(Time*0.9)*1.2)
-	sat2 := vec3(sin(Time*0.9+2.094)*1.2, cos(Time*0.7+2.094)*0.4, cos(Time*0.9+2.094)*1.2)
-	sat3 := vec3(sin(Time*0.9+4.189)*1.2, cos(Time*0.7+4.189)*0.4, cos(Time*0.9+4.189)*1.2)
-	satR := 0.08 + SmoothedTreble * 0.06
-	dSat1 := sdSphere(rp-sat1, satR)
-	dSat2 := sdSphere(rp-sat2, satR)
-	dSat3 := sdSphere(rp-sat3, satR)
+// ═══════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════
 
-	// Smooth blend all shapes together with organic smin
-	blendK := 0.4 + SmoothedBass * 0.6
-	d := smin(dTorus, dSphere, blendK)
-	d = smin(d, dSat1, 0.3)
-	d = smin(d, dSat2, 0.3)
-	d = smin(d, dSat3, 0.3)
+func calcNormal(p vec3) vec3 {
+	eps := 0.0008
+	dx := mapScene(vec3(p.x+eps, p.y, p.z)) - mapScene(vec3(p.x-eps, p.y, p.z))
+	dy := mapScene(vec3(p.x, p.y+eps, p.z)) - mapScene(vec3(p.x, p.y-eps, p.z))
+	dz := mapScene(vec3(p.x, p.y, p.z+eps)) - mapScene(vec3(p.x, p.y, p.z-eps))
+	return normalize(vec3(dx, dy, dz))
+}
 
-	return d + disp
+func calcAO(p vec3, n vec3) float {
+	occ := 0.0
+	sca := 1.0
+	for i := 0; i < 5; i++ {
+		hr := 0.02 + 0.1*float(i)
+		d := mapScene(p + n*hr)
+		occ += (hr - d) * sca
+		sca *= 0.9
+	}
+	return clamp(1.0-2.5*occ, 0.0, 1.0)
+}
+
+func softShadow(ro vec3, rd vec3) float {
+	res := 1.0
+	t := 0.03
+	for i := 0; i < 12; i++ {
+		h := mapScene(ro + rd*t)
+		res = min(res, 6.0*h/t)
+		t += clamp(h, 0.03, 0.2)
+		if h < 0.001 || t > 3.0 {
+			break
+		}
+	}
+	return clamp(res, 0.0, 1.0)
 }
 
 func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
 	uv := (dstPos.xy - 0.5*ScreenSize) / ScreenSize.y
+	blend := clamp(ActBlend, 0.0, 2.0)
 
-	// Smooth orbiting camera
-	camAngle := Time * 0.15
-	camRadius := 3.8 - SmoothedBass*0.4
-	camHeight := sin(Time*0.1) * 0.8
+	// ── Camera ──
+	barOffset := mod(BarCount, 6.0) * 1.0472
+	camAngle := Time*0.06 + barOffset
+	camRadius := 3.5 - SmoothedBass*0.25
+	camHeight := sin(Time*0.04) * 0.3
+
+	camHeight += mix(-0.3, 0.0, min(blend, 1.0))
+	camHeight += mix(0.0, 0.5, max(blend-1.0, 0.0))
+	camRadius += mix(0.0, 0.6, max(blend-1.0, 0.0))
 
 	ro := vec3(sin(camAngle)*camRadius, camHeight, cos(camAngle)*camRadius)
-	target := vec3(0.0)
-	forward := normalize(target - ro)
-	right := normalize(vec3(forward.z, 0.0, -forward.x))
-	up := cross(forward, right)
-	rd := normalize(forward*1.6 + right*uv.x + up*uv.y)
+	ta := vec3(0.0, sin(Time*0.03)*0.08, 0.0)
+	fwd := normalize(ta - ro)
+	rht := normalize(cross(fwd, vec3(0.0, 1.0, 0.0)))
+	upp := cross(rht, fwd)
+	rd := normalize(fwd*2.0 + rht*uv.x + upp*uv.y)
 
-	// Raymarching
+	// ── Rich Vibrant Palette from extracted ArtColors ──
+	// ArtColor1 = Vibrant Accent (e.g. Amber/Gold)
+	// ArtColor2 = Midtone Body Color (e.g. Deep Blue/Teal)
+	// ArtColor3 = Background Void Base
+	palAccent := max(ArtColor1, vec3(0.2, 0.2, 0.2)) * (1.2 + SmoothedMid*0.8)
+	palBody := max(ArtColor2, vec3(0.15, 0.15, 0.2)) * (0.9 + SmoothedBass*0.5)
+	palBase := max(ArtColor3, vec3(0.05, 0.08, 0.12))
+
+	// Warmth shift
+	warmShift := vec3(ArtWarmth*0.12, ArtWarmth*0.04, -ArtWarmth*0.12)
+	palAccent = max(palAccent + warmShift, vec3(0.1))
+	palBody = max(palBody + warmShift, vec3(0.05))
+
+	// ── Background: Vibrant Void + Artwork Glow ──
+	screenUV := dstPos.xy / ScreenSize
+	artCol := imageSrc0At(screenUV * ScreenSize).rgb
+	artLuma := dot(artCol, vec3(0.299, 0.587, 0.114))
+
+	bgCol := mix(palBase*0.25, artCol*(0.15 + artLuma*0.1), 0.4)
+	bgCol += palAccent * 0.04 * (1.0 - length(uv)*0.7)
+	col := bgCol
+
+	// ── Raymarch ──
 	t := 0.0
 	minDist := 100.0
-	totalDist := 0.0
-	var p vec3
+	var hitPos vec3
+	hit := false
 
 	for i := 0; i < 80; i++ {
-		p = ro + rd*t
+		p := ro + rd*t
 		d := mapScene(p)
 		if d < minDist {
 			minDist = d
 		}
-		if d < 0.001 {
+		if d < 0.0008 {
+			hitPos = p
+			hit = true
 			break
 		}
-		if t > 20.0 {
+		if t > 10.0 {
 			break
 		}
-		t += d * 0.6
-	}
-	totalDist = t
-
-	// Track-specific base palette
-	baseHue := HueOffset * 6.28
-	palette1 := vec3(0.5+0.5*sin(baseHue), 0.5+0.5*sin(baseHue+2.1), 0.5+0.5*sin(baseHue+4.2))
-	palette2 := vec3(0.5+0.5*cos(baseHue+1.0), 0.5+0.5*cos(baseHue+3.1), 0.5+0.5*cos(baseHue+5.2))
-
-	// Base image UV with audio-reactive liquid ripple effect
-	screenNormUV := dstPos.xy / ScreenSize
-	warpOffset := vec2(
-		sin(screenNormUV.y*12.0+Time*1.5)*0.008*(1.0+SmoothedBass*3.0),
-		cos(screenNormUV.x*12.0+Time*1.5)*0.008*(1.0+SmoothedBass*3.0),
-	)
-	bgTexColor := imageSrc0At((screenNormUV + warpOffset) * ScreenSize).rgb
-
-	// Mood-graded background combining track artwork + deep atmosphere
-	bgGraded := mix(bgTexColor*0.45, bgTexColor*palette1*0.8, 0.5)
-
-	// Start with atmospheric background
-	col := bgGraded
-
-	// Volumetric glow aura — breathes with bass energy
-	glowStrength := 0.02 / (minDist*minDist + 0.015)
-	glowColor := mix(palette1, palette2, sin(Time*0.3)*0.5+0.5) * (0.8 + SmoothedBass*1.2)
-	col += glowColor * glowStrength
-
-	// Surface shading for 3D GPU geometry
-	if totalDist < 20.0 && minDist < 0.01 {
-		eps := 0.002
-		nx := mapScene(vec3(p.x+eps, p.y, p.z)) - mapScene(vec3(p.x-eps, p.y, p.z))
-		ny := mapScene(vec3(p.x, p.y+eps, p.z)) - mapScene(vec3(p.x, p.y-eps, p.z))
-		nz := mapScene(vec3(p.x, p.y, p.z+eps)) - mapScene(vec3(p.x, p.y, p.z-eps))
-		n := normalize(vec3(nx, ny, nz))
-
-		// Two-point lighting for dramatic depth
-		light1 := normalize(vec3(0.6, 0.8, -0.5))
-		light2 := normalize(vec3(-0.5, -0.3, 0.7))
-
-		diff1 := max(dot(n, light1), 0.0)
-		diff2 := max(dot(n, light2), 0.0) * 0.3
-		spec := pow(max(dot(reflect(rd, n), light1), 0.0), 64.0)
-
-		// Fresnel rim lighting — glowing edge look
-		fresnel := pow(1.0 - abs(dot(rd, n)), 3.5)
-
-		// Environment refraction/reflection of the track artwork
-		reflUV := (n.xy*0.5 + vec2(0.5)) * ScreenSize
-		envCol := imageSrc0At(reflUV).rgb
-
-		// Combine: metallic surface + artwork reflection + fresnel rim
-		surfCol := palette1 * (diff1*0.4 + diff2*0.2 + 0.1)
-		surfCol += palette2 * fresnel * (0.8 + SmoothedTreble*1.2)
-		surfCol += envCol * (0.5 + fresnel*0.4)
-		surfCol += vec3(spec) * 0.6
-
-		// Ambient occlusion
-		ao := 1.0 - clamp(minDist*8.0, 0.0, 0.5)
-		surfCol *= (1.0 - ao*0.35)
-
-		// Fog blend between background artwork and 3D surface
-		fogFactor := 1.0 / (1.0 + totalDist*totalDist*0.006)
-		col = mix(bgGraded*0.3, surfCol, fogFactor)
+		t += d * 0.75
 	}
 
-	// Beat flash pulse
-	beatPulse := palette2 * (Onset * 0.25)
-	col += beatPulse
+	// Dynamic Stage Laser / Glow Aura
+	glowFall := 0.006 / (minDist*minDist + 0.002)
+	col += palAccent * glowFall * (0.4 + SmoothedBass*0.8)
 
-	// Vignette for cinematic framing
-	vignette := 1.0 - length(uv) * 0.55
-	col *= clamp(vignette, 0.0, 1.0)
+	// ── 3D Surface Shading with Embossed Artwork Texture ──
+	if hit {
+		n := calcNormal(hitPos)
 
-	// Film grain
-	grain := hash(dstPos.xy + vec2(Time*100.0)) * 0.015
+		lightDir := normalize(vec3(0.4+sin(Time*0.08)*0.2, 0.7+ArtWarmth*0.1, -0.5))
+		fillDir := normalize(vec3(-0.5, -0.3, 0.6))
+
+		diff := max(dot(n, lightDir), 0.0) * softShadow(hitPos+n*0.008, lightDir)
+		fill := max(dot(n, fillDir), 0.0) * 0.35
+
+		halfV := normalize(lightDir - rd)
+		spec := pow(max(dot(n, halfV), 0.0), 64.0)
+
+		fresnel := pow(1.0-abs(dot(rd, n)), 3.0)
+		ao := calcAO(hitPos, n)
+
+		// ── Direct 3D Texture Mapping of Album Artwork onto 3D Object ──
+		surfUV := clamp(hitPos.xy*0.35 + vec2(0.5), vec2(0.001), vec2(0.999)) * ScreenSize
+		surfArtTex := imageSrc0At(surfUV).rgb
+
+		// Base Shading using extracted Album Art Colors
+		matCol := palBody * (diff*0.7 + 0.15) * ao
+		matCol += palAccent * fill * ao
+		matCol += palAccent * spec * 1.5
+		matCol += mix(palAccent, vec3(1.0), 0.4) * fresnel * 0.6 * (1.0 + SmoothedTreble*1.5)
+
+		// Blend the actual Album Cover artwork directly onto the 3D surface!
+		frontFacing := clamp(dot(n, -rd), 0.0, 1.0)
+		artBlendRatio := 0.40 * frontFacing * (0.8 + SmoothedMid*0.4)
+		matCol = mix(matCol, surfArtTex * (diff*0.8 + 0.3) * (palAccent*0.8 + vec3(0.4)), artBlendRatio)
+
+		// Depth fade
+		depthFade := exp(-t*0.12)
+		col = mix(bgCol, matCol, depthFade)
+	}
+
+	// Beat pulse
+	col += palAccent * Onset * 0.04
+
+	// Vignette
+	vig := 1.0 - pow(length(uv)*0.85, 2.5)
+	col *= clamp(vig, 0.0, 1.0)
+
+	// Subtle grain
+	grain := (hash(dstPos.xy+vec2(Time*73.0)) - 0.5) * 0.01
 	col += vec3(grain)
+	col = max(col, vec3(0.0))
 
 	return vec4(col, 1.0)
 }

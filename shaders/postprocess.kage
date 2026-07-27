@@ -1,0 +1,71 @@
+//kage:unit pixels
+
+package main
+
+var ScreenSize vec2
+var Bass float
+var Mid float
+var Treble float
+var Onset float
+var BloomIntensity float
+var AberrationAmount float
+
+func hash(p vec2) float {
+	return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453)
+}
+
+// ACES filmic tonemapping
+func acesTonemap(x vec3) vec3 {
+	a := x * (x*2.51 + vec3(0.03))
+	b := x * (x*2.43 + vec3(0.59)) + vec3(0.14)
+	return clamp(a / b, vec3(0.0), vec3(1.0))
+}
+
+func Fragment(dstPos vec4, srcPos vec2, color vec4) vec4 {
+	uv := dstPos.xy / ScreenSize
+	centerDist := length(uv - vec2(0.5))
+
+	// ── Minimal chromatic aberration (edges only) ──
+	aberration := (0.0005 + Onset*0.002) * centerDist * centerDist
+	dir := vec2(0.0)
+	if centerDist > 0.001 {
+		dir = normalize(uv - vec2(0.5))
+	}
+
+	colR := imageSrc0At((uv + dir*aberration) * ScreenSize).r
+	colG := imageSrc0At(uv * ScreenSize).g
+	colB := imageSrc0At((uv - dir*aberration*0.6) * ScreenSize).b
+
+	baseColor := vec3(colR, colG, colB)
+
+	// ── Selective bloom: ONLY on very bright pixels (specular/glow highlights) ──
+	bloom := vec3(0.0)
+	threshold := 0.7
+	count := 0.0
+
+	for i := 0; i < 8; i++ {
+		fi := float(i)
+		angle := fi * 0.7854
+		offset := vec2(cos(angle), sin(angle)) * 1.5 / ScreenSize
+		samp := imageSrc0At((uv + offset) * ScreenSize).rgb
+		luma := dot(samp, vec3(0.2126, 0.7152, 0.0722))
+		if luma > threshold {
+			bloom += (samp - vec3(threshold)) * 0.5
+			count += 1.0
+		}
+	}
+	if count > 0.0 {
+		bloom /= count
+	}
+
+	finalCol := baseColor + bloom * BloomIntensity * 0.3
+
+	// ── ACES tonemapping ──
+	finalCol = acesTonemap(finalCol * 1.05)
+
+	// ── Subtle vignette ──
+	vig := 1.0 - pow(centerDist*1.0, 3.0)
+	finalCol *= clamp(vig, 0.0, 1.0)
+
+	return vec4(clamp(finalCol, vec3(0.0), vec3(1.0)), 1.0)
+}

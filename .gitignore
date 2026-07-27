@@ -9,7 +9,6 @@ visualizer.exe
 Thumbs.db
 *.log
 
-# Dynamically downloaded/generated track assets
-assets/track_*.jpg
-assets/track_*.jpeg
-assets/track_*.png
+# Ignore all downloaded/generated asset images inside assets/
+assets/*
+!assets/.gitkeep

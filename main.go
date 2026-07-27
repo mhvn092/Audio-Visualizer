@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"log"
+	"math"
 	"sync"
 	"time"
 
@@ -17,32 +18,55 @@ import (
 //go:embed shaders/visualizer.kage
 var visualizerShaderSrc []byte
 
-type Game struct {
-	shader       *ebiten.Shader
-	startTime    time.Time
-	audioCap     *audio.Capturer
-	metaReader   *audio.MetadataReader
-	imgFetcher   *gfx.ImageFetcher
-	texLib       *gfx.TextureLibrary
-	tickCount    int
-	beatCooldown int
-	currentMeta  audio.TrackMetadata
-	paused       bool
+//go:embed shaders/postprocess.kage
+var postprocessShaderSrc []byte
 
-	// Thread-safe queue for newly downloaded/generated artwork paths
+type Game struct {
+	shaderWatcher *gfx.ShaderWatcher
+	postPipeline  *gfx.PostPipeline
+	audioCap      *audio.Capturer
+	bpmEngine     *audio.BPMEngine
+	metaReader    *audio.MetadataReader
+	imgFetcher    *gfx.ImageFetcher
+	texLib        *gfx.TextureLibrary
+	startTime     time.Time
+	tickCount     int
+	beatCooldown  int
+	currentMeta   audio.TrackMetadata
+	paused        bool
+
 	pendingImgMu    sync.Mutex
 	pendingImgPaths []string
 
-	// Smoothed audio values for organic shader movement
+	reloadNoticeUntil time.Time
+
+	// Smoothed audio values
 	smoothBass   float32
 	smoothMid    float32
 	smoothTreble float32
+
+	// Dynamic act selection driven by audio energy profile
+	// 0.0 = Monolith (bass-heavy), 1.0 = Organism (mid/melodic), 2.0 = Constellation (treble/busy)
+	actBlend float32
+
+	// Running energy accumulators for act selection (longer time window)
+	energyBassAvg   float32
+	energyMidAvg    float32
+	energyTrebleAvg float32
+
+	// Cumulative audio energy — evolves continuously so shapes at min 5 ≠ min 30
+	evolution float32
 }
 
 func NewGame() (*Game, error) {
-	s, err := ebiten.NewShader(visualizerShaderSrc)
+	watcher, err := gfx.NewShaderWatcher("shaders/visualizer.kage", visualizerShaderSrc)
 	if err != nil {
-		return nil, fmt.Errorf("failed to compile shader: %w", err)
+		return nil, fmt.Errorf("failed to initialize shader watcher: %w", err)
+	}
+
+	postPipe, err := gfx.NewPostPipeline(postprocessShaderSrc)
+	if err != nil {
+		log.Printf("Warning: post pipeline init: %v", err)
 	}
 
 	cap := audio.NewCapturer()
@@ -56,23 +80,31 @@ func NewGame() (*Game, error) {
 	}
 
 	fetcher := gfx.NewImageFetcher()
+	bpm := audio.NewBPMEngine()
 
 	game := &Game{
-		shader:          s,
-		startTime:       time.Now(),
+		shaderWatcher:   watcher,
+		postPipeline:    postPipe,
 		audioCap:        cap,
+		bpmEngine:       bpm,
+		startTime:       time.Now(),
 		texLib:          lib,
 		imgFetcher:      fetcher,
 		pendingImgPaths: make([]string, 0),
 		currentMeta:     audio.TrackMetadata{Speed: 1.0, HueOffset: 0.6, GeoMode: 0},
+		actBlend:        0.0,
 	}
+
+	watcher.OnReload = func() {
+		game.reloadNoticeUntil = time.Now().Add(2500 * time.Millisecond)
+	}
+	watcher.Start()
 
 	metaReader := audio.NewMetadataReader(func(meta audio.TrackMetadata) {
 		game.currentMeta = meta
-		if meta.FullTrack != "" {
-			ebiten.SetWindowTitle(fmt.Sprintf("▶ %s", meta.FullTrack))
+		game.updateWindowTitle()
 
-			// Trigger automatic background artwork fetching based on track metadata
+		if meta.FullTrack != "" {
 			game.imgFetcher.FetchTrackArtwork(meta, func(imgPath string) {
 				game.pendingImgMu.Lock()
 				game.pendingImgPaths = append(game.pendingImgPaths, imgPath)
@@ -86,13 +118,31 @@ func NewGame() (*Game, error) {
 	return game, nil
 }
 
-// lerp smoothly interpolates between current and target
+func (g *Game) updateWindowTitle() {
+	bpmState := g.bpmEngine.GetState()
+	actNames := []string{"Monolith", "Organism", "Constellation"}
+	actIdx := int(g.actBlend) % 3
+
+	titleStr := fmt.Sprintf("Audio-Visualizer (%.0f BPM — %s)", bpmState.BPM, actNames[actIdx])
+	if g.currentMeta.FullTrack != "" {
+		titleStr = fmt.Sprintf("▶ %s (%.0f BPM — %s)", g.currentMeta.FullTrack, bpmState.BPM, actNames[actIdx])
+	}
+	if time.Now().Before(g.reloadNoticeUntil) {
+		titleStr += " [🔥 SHADER HOT-RELOADED]"
+	}
+	ebiten.SetWindowTitle(titleStr)
+}
+
 func lerp(current, target, speed float32) float32 {
 	return current + (target-current)*speed
 }
 
 func (g *Game) Update() error {
-	// Process any newly downloaded artwork on the main Ebitengine thread
+	if g.tickCount%30 == 0 || !g.reloadNoticeUntil.IsZero() {
+		g.updateWindowTitle()
+	}
+
+	// Process downloaded artwork on main thread
 	g.pendingImgMu.Lock()
 	if len(g.pendingImgPaths) > 0 {
 		pathsToProcess := g.pendingImgPaths
@@ -100,9 +150,9 @@ func (g *Game) Update() error {
 		g.pendingImgMu.Unlock()
 
 		for _, path := range pathsToProcess {
-			if eimg, err := gfx.LoadSingleImage(path); err == nil {
-				g.texLib.AddTextureAndActivate(eimg, path)
-				log.Printf("Embedded artwork for track: %s", path)
+			if eimg, feats, err := gfx.LoadSingleImageWithAnalysis(path); err == nil {
+				g.texLib.AddTextureWithFeatures(eimg, feats, path)
+				log.Printf("Embedded artwork for track: %s (Brightness: %.2f, Warmth: %.2f, Complexity: %.2f)", path, feats.Brightness, feats.Warmth, feats.Complexity)
 			}
 		}
 	} else {
@@ -133,8 +183,9 @@ func (g *Game) Update() error {
 	if g.audioCap != nil {
 		feat := g.audioCap.GetFeatures()
 
-		// Smooth interpolation — this is what makes the visuals feel organic
-		// instead of jittery. Attack fast (0.15), decay slow (0.04)
+		g.bpmEngine.ProcessSample(feat.Onset, feat.Bass)
+
+		// Smooth audio values
 		if feat.Bass > g.smoothBass {
 			g.smoothBass = lerp(g.smoothBass, feat.Bass, 0.15)
 		} else {
@@ -150,6 +201,34 @@ func (g *Game) Update() error {
 		} else {
 			g.smoothTreble = lerp(g.smoothTreble, feat.Treble, 0.03)
 		}
+
+		// ── Dynamic Act Selection based on audio energy profile ──
+		// Running exponential average over ~3-5 seconds (slow decay)
+		decay := float32(0.005) // Very slow — takes several seconds to shift acts
+		g.energyBassAvg = g.energyBassAvg*(1.0-decay) + g.smoothBass*decay
+		g.energyMidAvg = g.energyMidAvg*(1.0-decay) + g.smoothMid*decay
+		g.energyTrebleAvg = g.energyTrebleAvg*(1.0-decay) + g.smoothTreble*decay
+
+		// Determine dominant energy band
+		total := g.energyBassAvg + g.energyMidAvg + g.energyTrebleAvg + 0.001
+		bassRatio := g.energyBassAvg / total
+		midRatio := g.energyMidAvg / total
+		trebleRatio := g.energyTrebleAvg / total
+
+		// Target act: weighted centroid
+		// Bass-dominant → 0 (Monolith), Mid-dominant → 1 (Organism), Treble-dominant → 2 (Constellation)
+		targetAct := float32(0.0)*bassRatio + float32(1.0)*midRatio + float32(2.0)*trebleRatio
+
+		// Artwork complexity bias: simple covers nudge toward Monolith, complex covers nudge toward Constellation
+		artFeats := g.texLib.GetCurrentFeatures()
+		artBias := (artFeats.Complexity - 0.4) * 0.4
+		targetAct = float32(math.Max(0, math.Min(2.0, float64(targetAct+artBias))))
+
+		// Clamp and smooth transition to target
+		g.actBlend = lerp(g.actBlend, targetAct, 0.008) // Very slow transition
+
+		// Evolution: cumulative energy that grows continuously over the set
+		g.evolution += (g.smoothBass + g.smoothMid + g.smoothTreble) * 0.0003
 
 		if g.beatCooldown > 0 {
 			g.beatCooldown--
@@ -176,12 +255,11 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		feat = g.audioCap.GetFeatures()
 	}
 
+	bpmState := g.bpmEngine.GetState()
 	currentPhoto := g.texLib.GetCurrentResized(w, h)
+	artFeats := g.texLib.GetCurrentFeatures()
 
-	op := &ebiten.DrawRectShaderOptions{}
-	op.Images[0] = currentPhoto
-	op.Images[1] = currentPhoto
-	op.Uniforms = map[string]any{
+	uniforms := map[string]any{
 		"Time":           t,
 		"ScreenSize":     []float32{float32(w), float32(h)},
 		"Bass":           feat.Bass,
@@ -193,9 +271,29 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		"SmoothedBass":   g.smoothBass,
 		"SmoothedMid":    g.smoothMid,
 		"SmoothedTreble": g.smoothTreble,
+		"BPM":            bpmState.BPM,
+		"BeatPhase":      bpmState.BeatPhase,
+		"BarCount":       float32(bpmState.BarCount),
+		"ActBlend":       g.actBlend,
+		"Evolution":      g.evolution,
+		"ArtColor1":      []float32{artFeats.DominantColors[0][0], artFeats.DominantColors[0][1], artFeats.DominantColors[0][2]},
+		"ArtColor2":      []float32{artFeats.DominantColors[1][0], artFeats.DominantColors[1][1], artFeats.DominantColors[1][2]},
+		"ArtColor3":      []float32{artFeats.DominantColors[2][0], artFeats.DominantColors[2][1], artFeats.DominantColors[2][2]},
+		"ArtBrightness":  artFeats.Brightness,
+		"ArtWarmth":      artFeats.Warmth,
+		"ArtComplexity":  artFeats.Complexity,
+		"ArtContrast":    artFeats.Contrast,
 	}
 
-	screen.DrawRectShader(w, h, g.shader, op)
+	g.postPipeline.Render(screen, func(target *ebiten.Image) {
+		op := &ebiten.DrawRectShaderOptions{}
+		op.Images[0] = currentPhoto
+		op.Images[1] = currentPhoto
+		op.Uniforms = uniforms
+
+		currentShader := g.shaderWatcher.GetShader()
+		target.DrawRectShader(w, h, currentShader, op)
+	}, uniforms)
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
@@ -213,6 +311,8 @@ func main() {
 	}
 	defer game.audioCap.Stop()
 	defer game.metaReader.Stop()
+	defer game.shaderWatcher.Stop()
+	defer game.postPipeline.Stop()
 
 	if err := ebiten.RunGame(game); err != nil {
 		log.Fatal(err)
