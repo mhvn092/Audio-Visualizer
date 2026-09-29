@@ -64,6 +64,13 @@ This application captures live Windows audio loopback, analyzes frequency bands 
 
 ---
 
+## 🧭 Engine Plan (start here)
+
+The full, step-by-step plan for taking this project to stage-grade ("Anyma-level") visuals lives in
+[`docs/plan/README.md`](docs/plan/README.md). It covers a diagnosis of the current code, the target architecture,
+seven phases with concrete tasks and acceptance criteria, the art direction rules, and a browser demo of the target
+look (`docs/plan/demo/colossus-demo.html`). The older roadmap below is superseded by it.
+
 ## 🗺️ Roadmap to "Crazy" Concert-Level Visualizer
 
 Here is the master plan for evolving this project into an industry-grade, mind-blowing visual engine:
