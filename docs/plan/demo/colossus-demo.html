@@ -1,0 +1,1326 @@
+<!doctype html>
+<!-- Colossus demo: a browser prototype of the target look and director. Open in a desktop browser (needs internet for three.js from jsDelivr). The director logic lives in the first <script> (state(), camera()); it is the reference implementation of docs/plan/phase-3-director.md. -->
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>Colossus Engine Plan</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,100..900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400..700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with a full-width demo stage up top; data set in a show-control cue-sheet grammar. Deliberately dark-only: it is a control-room document. */
+:root{
+  --bg:#0b0d10;
+  --panel:#11151a;
+  --panel-2:#171c23;
+  --line:#252c35;
+  --fg:#e7ebf0;
+  --muted:#9aa4af;
+  --dim:#66717d;
+  --accent:#a9c8ff;
+  --hot:#ff5b4a;
+  --ok:#72d3a8;
+  --display:"Archivo","Arial Narrow",system-ui,sans-serif;
+  --body:"Instrument Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+  --step--1:0.8125rem;
+  --step-0:1rem;
+  --step-1:1.1875rem;
+  --step-2:clamp(1.35rem,1.1rem + 1vw,1.75rem);
+  --step-3:clamp(1.7rem,1.2rem + 2vw,2.5rem);
+  --step-4:clamp(2.2rem,1.3rem + 3.6vw,4rem);
+  color-scheme:dark;
+}
+html,body{background:var(--bg);color:var(--fg)}
+body{font-family:var(--body);font-size:var(--step-0);line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-underline-offset:3px}
+a:hover{color:var(--fg)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:74rem;margin:0 auto;padding-inline:clamp(16px,4vw,40px);padding-block:28px 96px}
+.measure{max-width:44rem}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0}
+h1{font-size:var(--step-4);font-stretch:118%;font-weight:800;line-height:1.02;letter-spacing:-0.015em}
+h2{font-size:var(--step-3);font-stretch:112%;font-weight:780;line-height:1.1;letter-spacing:-0.01em}
+h3{font-size:var(--step-1);font-stretch:108%;font-weight:720;line-height:1.25}
+p{margin:0}
+.eyebrow{font-family:var(--mono);font-size:var(--step--1);letter-spacing:0.12em;text-transform:uppercase;color:var(--muted)}
+.lede{font-size:var(--step-1);color:var(--fg);max-width:46rem}
+.muted{color:var(--muted)}
+.small{font-size:var(--step--1)}
+.stack{display:flex;flex-direction:column;gap:14px}
+section.block{display:flex;flex-direction:column;gap:22px;padding-block:56px 0;border-top:1px solid var(--line);margin-top:56px}
+section.block:first-of-type{margin-top:40px}
+.head{display:flex;flex-direction:column;gap:10px}
+code,.mono{font-family:var(--mono);font-size:0.9em}
+code{background:var(--panel-2);padding:1px 5px;border-radius:3px;color:var(--fg)}
+ul.clean{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:8px}
+ul.clean li::marker{color:var(--dim)}
+strong{font-weight:650}
+
+/* hero */
+.hero{display:flex;flex-direction:column;gap:18px;padding-top:12px}
+
+/* demo stage */
+.demo{display:flex;flex-direction:column;gap:12px;margin-top:30px}
+.stage{position:relative;width:100%;max-width:100%;aspect-ratio:16/9;background:#030405;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.stage canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+.stage .fallback{position:absolute;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:var(--muted);font-family:var(--mono);font-size:var(--step--1)}
+.hud{position:absolute;pointer-events:none;font-family:var(--mono);font-size:clamp(10px,1.2vw,12.5px);line-height:1.45;color:#e7ebf0;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+.hud-tl{top:12px;left:14px}
+.hud-tr{top:12px;right:14px;text-align:right}
+.hud-bl{bottom:12px;left:14px;color:#9aa4af}
+.hud .sec{font-family:var(--display);font-stretch:115%;font-weight:760;font-size:clamp(13px,1.7vw,19px);letter-spacing:0.02em;text-transform:uppercase}
+.hud .drop{color:#ff7a6b}
+.poster{position:absolute;inset:0;display:flex;align-items:flex-end;justify-content:center;padding-bottom:9%;pointer-events:none}
+.poster span{font-family:var(--mono);font-size:var(--step--1);color:#e7ebf0;background:rgba(3,4,5,.55);border:1px solid rgba(231,235,240,.2);padding:6px 10px;border-radius:3px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.btn{font:600 var(--step--1)/1 var(--body);letter-spacing:0.02em;padding:10px 14px;border:1px solid var(--line);background:var(--panel);color:var(--fg);border-radius:3px;cursor:pointer}
+.btn:hover{border-color:var(--dim)}
+.btn[aria-pressed="true"]{background:var(--panel-2);border-color:var(--accent);color:var(--accent)}
+.btn.primary{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+.btn.primary:hover{background:#fff}
+.seg{display:inline-flex}
+.seg .btn{border-radius:0}
+.seg .btn:first-child{border-radius:3px 0 0 3px}
+.seg .btn:last-child{border-radius:0 3px 3px 0;border-left:0}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:500 12px/1 var(--mono);padding:7px 9px;border:1px solid var(--line);background:transparent;color:var(--muted);border-radius:3px;cursor:pointer}
+.chip:hover{color:var(--fg);border-color:var(--dim)}
+.chip.is-drop{color:#ff8e81}
+.caption{font-size:var(--step--1);color:var(--muted);max-width:52rem}
+@media (max-width:640px){.hud-tr,.hud-bl,#hudShot{display:none}.poster{padding-bottom:6%}.poster span{font-size:11px}}
+.warn{color:var(--fg)}
+
+/* cards and grids */
+.grid{display:grid;gap:14px}
+.grid.cols-2{grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr))}
+.grid.cols-3{grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))}
+.grid.cols-4{grid-template-columns:repeat(auto-fit,minmax(min(100%,15rem),1fr))}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:18px 18px 20px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.card .k{font-family:var(--mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--dim)}
+.card p{color:var(--muted)}
+.card h3{color:var(--fg)}
+.rule .k{color:var(--accent)}
+
+/* tables */
+.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:var(--step--1)}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font-family:var(--mono);font-weight:500;font-size:11.5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);background:var(--panel)}
+tr:last-child td{border-bottom:0}
+td{color:var(--muted)}
+td:first-child{color:var(--fg)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--mono)}
+tr.total td{color:var(--fg);font-weight:600;background:var(--panel)}
+.tag{display:inline-block;font:500 11px/1.4 var(--mono);padding:1px 6px;border-radius:3px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+.tag.hot{border-color:rgba(255,91,74,.5);color:#ff8e81}
+.tag.ok{border-color:rgba(114,211,168,.45);color:var(--ok)}
+.tag.acc{border-color:rgba(169,200,255,.45);color:var(--accent)}
+
+/* subsystem spec */
+.spec{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:22px;align-items:start}
+@media (max-width:820px){.spec{grid-template-columns:minmax(0,1fr)}}
+.done{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--ok);border-radius:4px;padding:16px 18px;display:flex;flex-direction:column;gap:8px}
+.done .k{font-family:var(--mono);font-size:12px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ok)}
+.done ul{margin:0;padding-left:1.1rem;color:var(--muted);display:flex;flex-direction:column;gap:6px;font-size:var(--step--1)}
+.sysname{font-family:var(--mono);font-size:12px;letter-spacing:0.14em;color:var(--accent)}
+
+/* diagrams */
+.figure{overflow-x:auto;border:1px solid var(--line);border-radius:4px;background:var(--panel);padding:14px}
+.figure svg{display:block;width:100%;min-width:760px;height:auto}
+.d-box{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+.d-box.key{stroke:var(--accent)}
+.d-title{fill:var(--fg);font-family:var(--display);font-weight:760;font-size:14px;letter-spacing:0.04em}
+.d-sub{fill:var(--muted);font-family:var(--mono);font-size:10.5px}
+.d-arrow{stroke:var(--dim);stroke-width:1.4;fill:none}
+.d-label{fill:var(--accent);font-family:var(--mono);font-size:10.5px}
+.d-head{fill:var(--dim)}
+.cue-label{fill:var(--muted);font-family:var(--mono);font-size:10.5px}
+.cue-sec{fill:var(--fg);font-family:var(--mono);font-size:10px}
+.cue-grid{stroke:var(--line);stroke-width:1}
+.cue-play{stroke:var(--fg);stroke-width:1.5}
+
+/* roadmap */
+.phases{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.phase{display:grid;grid-template-columns:5.5rem minmax(0,1fr) minmax(0,0.9fr);gap:18px;padding:18px;border-bottom:1px solid var(--line);background:var(--panel)}
+.phase:last-child{border-bottom:0}
+.phase .n{font-family:var(--display);font-stretch:120%;font-weight:800;font-size:var(--step-2);color:var(--dim);line-height:1}
+.phase .n small{display:block;font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);letter-spacing:0.04em;margin-top:6px}
+.phase h3{margin-bottom:6px}
+.phase p,.phase li{color:var(--muted);font-size:var(--step--1)}
+.phase ul{margin:0;padding-left:1.1rem;display:flex;flex-direction:column;gap:4px}
+.phase .dw{border-left:1px solid var(--line);padding-left:16px}
+.phase .dw .k{font-family:var(--mono);font-size:11px;letter-spacing:0.08em;text-transform:uppercase;color:var(--ok);margin-bottom:6px}
+@media (max-width:820px){.phase{grid-template-columns:minmax(0,1fr)}.phase .dw{border-left:0;padding-left:0}}
+
+.sources{columns:2 22rem;column-gap:28px;font-size:var(--step--1);color:var(--muted);margin:0;padding-left:1.1rem}
+.sources li{break-inside:avoid;margin-bottom:6px}
+footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);color:var(--dim);font-size:var(--step--1)}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+</style>
+
+<div class="wrap">
+
+<header class="hero">
+  <p class="eyebrow">Audio-Visualizer · engine plan · September 2026</p>
+  <h1>Stage-grade visuals for any song, on one PC</h1>
+  <p class="lede">Anyma's shows look expensive for two reasons: the content is made long before the show, and every visual event lands on musical time. This plan gives the visualizer both. It adds a bank of pre-produced assets, a director that predicts beats, phrases and drops, and a background forge that makes new material for each track. Everything renders through an HDR WebGPU pipeline with a fixed frame budget.</p>
+</header>
+
+<div class="demo" id="demo">
+  <div class="stage" id="stage">
+    <canvas id="stageCanvas" aria-label="Live demo: a chrome monolith on a hazy stage, directed to a synthesized techno track"></canvas>
+    <div class="fallback" id="stageFallback">Loading the live demo…</div>
+    <div class="hud hud-tl" id="hudTL" hidden><div class="sec" id="hudSec">Drop 1</div><div id="hudPos">Bar 2/16 · Beat 1</div><div id="hudShot">Shot: Monumental wide</div></div>
+    <div class="hud hud-tr" id="hudTR" hidden><div id="hudNextCut">Next cut: Seam close-up in 2 bars</div><div id="hudNextSec">Next section: Breakdown in 14 bars</div></div>
+    <div class="hud hud-bl" id="hudBL" hidden>render 1.00× · A/V comp 0 ms</div>
+    <div class="poster" id="poster" hidden><span>Press Play for sound. The show runs about two minutes.</span></div>
+  </div>
+  <div class="controls">
+    <button class="btn primary" id="btnPlay" type="button">Play with sound</button>
+    <div class="seg" role="group" aria-label="Visual mode">
+      <button class="btn" id="btnDirected" type="button" aria-pressed="true">Directed (the plan)</button>
+      <button class="btn" id="btnReactive" type="button" aria-pressed="false">Reactive (today)</button>
+    </div>
+    <button class="btn" id="btnStrobe" type="button" aria-pressed="true">Strobe on</button>
+    <button class="btn" id="btnMute" type="button" aria-pressed="false">Mute</button>
+  </div>
+  <div class="chips" id="chips" aria-label="Jump to section"></div>
+  <p class="caption">This is a live prototype of the target look and choreography, built with three.js and a synthesized 124 BPM track. Here the director reads the track's timeline, which Song Memory supplies when a song plays for the second time. In the engine, the EAR computes it live. Switch to Reactive to see the same music driven the way the app works today. <span class="warn">Contains strobe flashes.</span> Strobe starts off if your system asks for reduced motion.</p>
+</div>
+
+<!-- ============ DIAGNOSIS ============ -->
+<section class="block" id="diagnosis">
+  <div class="head">
+    <p class="eyebrow">Diagnosis</p>
+    <h2>Why it looks amateur today</h2>
+    <p class="measure muted">The gap has five root causes: how content is made, how time is tracked, how light works, how reactions are chosen, and what the engine allows. Tuning the current shader can't close it.</p>
+  </div>
+  <div class="grid cols-3">
+    <div class="card"><p class="k">Content</p><h3>Everything is invented live</h3><p>One full-screen shader builds the whole world from math, every frame. Anyma's team builds content in advance in Cinema 4D, Houdini and Unreal Engine 5. They use volumetric capture and render on cloud farms at up to 16K. The Sphere show took about four years and more than a hundred people. In the show itself, real-time work is playback, reaction and control.</p></div>
+    <div class="card"><p class="k">Time</p><h3>Time is just loudness</h3><p>The app reacts to band energy. It has no beat grid, bars, phrases, sections or drop forecast. Its beat phase is a free-running metronome that is never locked to the music.</p></div>
+    <div class="card"><p class="k">Light</p><h3>Light is flat</h3><p>It renders into 8-bit buffers, with no area lights, reflections or haze, and a bloom radius of 1.5 pixels. Stage visuals are mostly light: black space, haze, a few very bright sources and chrome that reflects them.</p></div>
+    <div class="card"><p class="k">Reaction</p><h3>Everything reacts to everything</h3><p>Every band moves every parameter all the time, so nothing reads as intentional. Professional shows give each musical element one visual channel and keep most things still.</p></div>
+    <div class="card"><p class="k">Engine</p><h3>The engine has a ceiling</h3><p>Ebiten is a 2D engine. Version 2.9.9 has no pixel-format option (8-bit RGBA only) and allows four input images per shader. It has no depth buffer, compute, instancing, storage buffers, multiple render targets or 3D textures. Each of these blocks part of the target look.</p></div>
+  </div>
+
+  <h3 style="margin-top:10px">Verified defects in the current code</h3>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Where</th><th>What happens</th><th>Effect on screen</th></tr></thead>
+      <tbody>
+        <tr><td><code>audio/bpm.go:59–71</code></td><td>Beat phase comes from a timer started at app launch. Detected onsets never move it.</td><td>Anything "on the beat" lands at a random offset from the music.</td></tr>
+        <tr><td><code>audio/capture.go:124</code></td><td>Packets flagged silent or discontinuous are skipped, and loopback sends nothing while idle.</td><td>After a pause, the features freeze at the last loud value and the visuals keep pumping.</td></tr>
+        <tr><td><code>audio/capture.go:73</code>, <code>main.go:104</code></td><td>The analyzer and track metadata are replaced from background goroutines while the render loop reads them.</td><td>Data races: rare glitches and crashes.</td></tr>
+        <tr><td><code>audio/analysis.go</code></td><td>A recursive 512-point FFT allocates on every window. At 48 kHz each bin is 94 Hz wide, which leaves about two bins for the bass band. It uses linear magnitudes and a single bass-only onset.</td><td>Kick and bass blur together, and snares and hats never trigger anything.</td></tr>
+        <tr><td><code>main.go:186</code></td><td>The onset is sampled at 60 Hz from a value that decays on every FFT hop, against a fixed 0.75 threshold.</td><td>Missed beats and a jumpy BPM.</td></tr>
+        <tr><td><code>shaders/visualizer.kage:204–329</code></td><td>Each scene sample evaluates all three acts plus a texture fetch. With up to 80 march, 6 normal, 5 AO and 12 shadow samples, that is about 103 samples per pixel at full resolution.</td><td>Most of the GPU goes on morphing blobs. Nothing is left for light.</td></tr>
+        <tr><td><code>shaders/visualizer.kage:225</code></td><td>Subtracting the cover-art relief from the distance field breaks its distance bound.</td><td>Noisy surfaces and extra march steps.</td></tr>
+        <tr><td><code>gfx/library.go:154</code></td><td>The square cover is stretched to the window's aspect ratio.</td><td>Distorted artwork.</td></tr>
+        <tr><td><code>shaders/postprocess.kage:46</code></td><td>The "bloom" is 8 taps at 1.5 px on an 8-bit buffer.</td><td>No glow. Highlights clip.</td></tr>
+        <tr><td><code>audio/metadata.go:61</code></td><td>PowerShell is launched every 4 seconds.</td><td>CPU spikes. Track changes show up to 4 s late, with no playback position or pause state.</td></tr>
+        <tr><td><code>main.go:262</code>, <code>gfx/postprocess.go:56</code></td><td>New uniform maps are allocated every frame.</td><td>Garbage-collector churn and micro-stutter.</td></tr>
+        <tr><td><code>shaders/pulse.kage</code></td><td>The shader is never loaded.</td><td>Dead code.</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="small muted">Correction to my previous reply: the capture code does use the device's real sample rate (<code>capture.go:71–73</code>). The 512-point FFT is still the problem.</p>
+</section>
+
+<!-- ============ ANYMA ============ -->
+<section class="block" id="anyma">
+  <div class="head">
+    <p class="eyebrow">Reference</p>
+    <h2>What Anyma actually does</h2>
+  </div>
+  <div class="grid cols-3">
+    <div class="card"><p class="k">Content</p><p>A studio pipeline builds it ahead of time. Cinema 4D and Houdini handle simulations, Unreal Engine 5 the scenes, and volumetric and motion capture the performers. Everything is rendered on custom pipelines and cloud farms, at 16K for the Sphere.</p></div>
+    <div class="card"><p class="k">Sync</p><p>The show runs to timecode through disguise, so visuals, lighting and sound hit together. Nothing is guessed live.</p></div>
+    <div class="card"><p class="k">Story</p><p>There is a character (Eva, the Genesys android), monumental scale and fourth-wall breaks. In one, a robot breaks out of the Sphere's LED surface, telling the story of an AI trying to get out of the box.</p></div>
+  </div>
+  <div class="grid cols-2">
+    <div class="card"><p class="k">Copy their method</p><ul class="clean"><li>Make every expensive asset before it's needed</li><li>Timecode-grade sync, with hits landing on the audible beat</li><li>A hero character, monumental scale, cinematic cuts</li><li>Restraint: darkness, haze and a few hot lights</li></ul></div>
+    <div class="card"><p class="k">Win where a fixed show can't</p><ul class="clean"><li>Every song gets its own show, including songs nobody planned for</li><li>Content keeps growing per track, on your own machine</li><li>Room lights join the show through DMX, Hue and WLED</li><li>Box mode turns one screen into a window for one viewer</li></ul></div>
+  </div>
+</section>
+
+<!-- ============ RULES ============ -->
+<section class="block" id="rules">
+  <div class="head">
+    <p class="eyebrow">Thesis</p>
+    <h2>Four rules the engine is built on</h2>
+  </div>
+  <div class="grid cols-4">
+    <div class="card rule"><p class="k">Pre-produce</p><h3>Bake anything expensive</h3><p>Simulations, lighting, geometry, textures and whole worlds are made in advance and stored in an asset bank. At runtime the engine only plays, relights, composites and directs them.</p></div>
+    <div class="card rule"><p class="k">Schedule</p><h3>Cue on musical time</h3><p>A musical clock (beat, bar, phrase, section, drop forecast) triggers every cue. Cues fire early by the measured A/V latency, so they land with the sound. Replays use the stored song timeline, like a timecoded show.</p></div>
+    <div class="card rule"><p class="k">Generate ahead</p><h3>Never inside the frame</h3><p>A background forge makes new material for each track against deadlines ("needed by drop 2 in 95 s"). It passes a quality gate and swaps in on a phrase boundary.</p></div>
+    <div class="card rule"><p class="k">Spend on light</p><h3>Pixels go to light</h3><p>HDR buffers, area-light reflections, haze, real bloom and grading. A budget governor holds the frame rate so the motion stays smooth.</p></div>
+  </div>
+</section>
+
+<!-- ============ ARCHITECTURE ============ -->
+<section class="block" id="architecture">
+  <div class="head">
+    <p class="eyebrow">Architecture</p>
+    <h2>Five subsystems, four clocks</h2>
+    <p class="measure muted">The audio thread never waits on anything. The director ticks at 240 Hz on musical time, the renderer runs at display rate, and the forge works in the background against deadlines. The app stays in Go, and the renderer moves from Ebiten to WebGPU.</p>
+  </div>
+  <div class="figure">
+    <svg viewBox="0 0 1060 400" role="img" aria-label="Architecture: Windows audio feeds the EAR, which drives the DIRECTOR, which drives the RENDERER to the screen. The DIRECTOR sends jobs to the FORGE, which writes assets to the VAULT. The VAULT streams assets to the RENDERER and song memory to the EAR. The RENDERER sends frame-synced light cues to the ROOM.">
+      <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="d-head"/></marker></defs>
+      <rect class="d-box" x="10" y="40" width="140" height="84" rx="4"/>
+      <text class="d-title" x="24" y="66">AUDIO IN</text><text class="d-sub" x="24" y="88">WASAPI loopback</text><text class="d-sub" x="24" y="106">media session</text>
+      <rect class="d-box" x="220" y="40" width="160" height="84" rx="4"/>
+      <text class="d-title" x="234" y="66">EAR</text><text class="d-sub" x="234" y="88">beat grid · sections</text><text class="d-sub" x="234" y="106">audio thread</text>
+      <rect class="d-box key" x="450" y="40" width="160" height="84" rx="4"/>
+      <text class="d-title" x="464" y="66">DIRECTOR</text><text class="d-sub" x="464" y="88">shots · cues · looks</text><text class="d-sub" x="464" y="106">240 Hz tick</text>
+      <rect class="d-box" x="680" y="40" width="160" height="84" rx="4"/>
+      <text class="d-title" x="694" y="66">RENDERER</text><text class="d-sub" x="694" y="88">WebGPU · HDR</text><text class="d-sub" x="694" y="106">display rate</text>
+      <rect class="d-box" x="910" y="40" width="140" height="84" rx="4"/>
+      <text class="d-title" x="924" y="66">SCREEN</text><text class="d-sub" x="924" y="88">1440p · 120 Hz</text>
+      <rect class="d-box" x="450" y="176" width="160" height="76" rx="4"/>
+      <text class="d-title" x="464" y="202">FORGE</text><text class="d-sub" x="464" y="222">generation jobs</text><text class="d-sub" x="464" y="238">workers · NPU · cloud</text>
+      <rect class="d-box" x="910" y="176" width="140" height="76" rx="4"/>
+      <text class="d-title" x="924" y="202">ROOM</text><text class="d-sub" x="924" y="222">DMX · Hue · WLED</text>
+      <rect class="d-box" x="220" y="304" width="620" height="76" rx="4"/>
+      <text class="d-title" x="234" y="330">VAULT</text><text class="d-sub" x="234" y="350">asset bank · generated content · song memory</text><text class="d-sub" x="234" y="366">content-addressed cache on disk</text>
+      <path class="d-arrow" d="M150 82 H218" marker-end="url(#ah)"/><text class="d-label" x="160" y="74">audio</text>
+      <path class="d-arrow" d="M380 82 H448" marker-end="url(#ah)"/><text class="d-label" x="392" y="74">clock</text>
+      <path class="d-arrow" d="M610 82 H678" marker-end="url(#ah)"/><text class="d-label" x="626" y="74">cues</text>
+      <path class="d-arrow" d="M840 82 H908" marker-end="url(#ah)"/><text class="d-label" x="850" y="74">frames</text>
+      <path class="d-arrow" d="M530 124 V174" marker-end="url(#ah)"/><text class="d-label" x="538" y="154">jobs + deadlines</text>
+      <path class="d-arrow" d="M530 252 V302" marker-end="url(#ah)"/><text class="d-label" x="538" y="282">assets</text>
+      <path class="d-arrow" d="M760 304 V126" marker-end="url(#ah)"/><text class="d-label" x="752" y="250" text-anchor="end">streamed assets</text>
+      <path class="d-arrow" d="M300 304 V126" marker-end="url(#ah)"/><text class="d-label" x="308" y="220">song memory</text>
+      <path class="d-arrow" d="M820 124 V214 H908" marker-end="url(#ah)"/><text class="d-label" x="828" y="160">light cues</text>
+    </svg>
+  </div>
+</section>
+
+<!-- ============ EAR ============ -->
+<section class="block" id="ear">
+  <div class="head">
+    <p class="sysname">EAR · audio intelligence</p>
+    <h2>Turn loudness into a musical clock</h2>
+  </div>
+  <div class="spec">
+    <div class="stack">
+      <ul class="clean">
+        <li><strong>Capture.</strong> WASAPI loopback with QPC timestamps. It feeds zeros during silence, so the visuals come to rest. On Windows 11, per-app capture (build 20348 and later) keeps notification sounds out of the show.</li>
+        <li><strong>Metadata.</strong> Native WinRT media-session events through <code>winrt-go</code> replace PowerShell polling. They give instant track changes, play and pause state, the playback position and the player's own cover image.</li>
+        <li><strong>Features at 48 kHz.</strong> A 2048-point STFT with a 256-sample hop (5.3 ms) feeds 64 log mel bands. Per-band spectral flux with adaptive thresholds covers the kick, snare, hat and vocal ranges. It also tracks short-term loudness, centroid and flatness, plus chroma for key and mode.</li>
+        <li><strong>Musical clock.</strong> An onset envelope gives the tempo (autocorrelation plus a comb filter), and a phase-locked loop locks the beat. Downbeats come from accent patterns and harmonic change. A phrase counter tracks 8, 16 and 32 bars. A section classifier labels intro, build, drop, break and outro. The drop forecast gives the chance of a drop in the next 1, 2 or 4 bars.</li>
+        <li><strong>Latency.</strong> A one-time calibration (a flash and a click) measures the A/V offset. Cues then fire that much early, so a visual hit lands with the audible kick.</li>
+        <li><strong>Song Memory.</strong> For each track (artist, title, duration) the EAR stores beats, downbeats, sections and the energy curve. On a replay it aligns them using the media-session position and onset cross-correlation, and gets exact foresight, the same as a timecoded show.</li>
+        <li><strong>ML upgrades (optional).</strong> Candidates are causal beat trackers such as BeatNet or BEAST (under 50 ms latency), real-time stems like HS-TasNet or StemgenRT (about 3–6 ms delay), and All-In-One structure analysis after a first play. They run on CPU or NPU through Windows ML, or through ONNX Runtime called from Go without cgo.</li>
+      </ul>
+    </div>
+    <div class="done">
+      <p class="k">Done when</p>
+      <ul>
+        <li>Beat-phase error is under 20 ms at p90 on a 30-track 4/4 test set</li>
+        <li>80% of drops are flagged at least one bar ahead on first play</li>
+        <li>Visuals are at rest within 1 s of pausing</li>
+        <li>A recorded-feature replay reproduces a show frame for frame</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ DIRECTOR ============ -->
+<section class="block" id="director">
+  <div class="head">
+    <p class="sysname">DIRECTOR · show brain</p>
+    <h2>Schedule the show like a lighting designer would</h2>
+  </div>
+  <div class="spec">
+    <div class="stack">
+      <ul class="clean">
+        <li><strong>Timeline.</strong> Show → track → section → phrase → bar → beat. Every cue is quantized to this grid.</li>
+        <li><strong>Show grammar.</strong> Worlds, shots (camera rigs), cues, looks and rules live in data files that hot-reload, the way shaders do today.</li>
+        <li><strong>Reaction budget.</strong> Each musical element drives one visual channel: kick to key light, snare to strobe, hats to lasers and particles, melody or vocal to the hero's glow, bass to fog and camera. An intensity level from 0 to 5 decides how many channels are live.</li>
+        <li><strong>Playbook.</strong> The intro reveals the stage from darkness. The build adds tension: the strobe tracks the snare roll (capped at three flashes per second), the camera pushes in, beams converge and color drains toward white. Then comes one half-bar of darkness. The drop opens with a hard cut to a monumental wide shot and a white flash on beat 1, the hero awakens, lasers come on and the shot changes every four bars. The breakdown is slow and close. The outro pulls back into haze.</li>
+        <li><strong>Camera.</strong> A physical camera (focal length and aperture) on rigs: dolly, crane, orbit and light handheld noise. Moves start on downbeats and end on phrase boundaries. The next shot's assets and pipelines load a phrase ahead.</li>
+        <li><strong>Show writer (optional).</strong> On each track change, Claude returns a JSON show script chosen from the grammar's vocabulary: worlds, the shot order per section, palette, hero behavior and forge prompts. It uses Claude Opus 5.5 at low effort through the official Go SDK, with structured outputs and a cached vocabulary prompt. It picks from a vocabulary and never writes code or shaders. The rule-based director takes over if the script is late or invalid, or the app is offline.</li>
+      </ul>
+    </div>
+    <div class="done">
+      <p class="k">Done when</p>
+      <ul>
+        <li>Cuts land within ±1 frame of the scheduled beat</li>
+        <li>On first play, 80% of drops get their cut on beat 1. On a replay, 100% do.</li>
+        <li>No cut falls mid-phrase unless a drop forces it</li>
+      </ul>
+    </div>
+  </div>
+  <h3 style="margin-top:6px">The demo's cue sheet</h3>
+  <p class="measure muted small">Each row is one visual channel and the musical element that drives it, across the demo's 64 bars. Cuts land on phrase boundaries, and each drop gets a cut and a flash on beat 1. The last half-bar before each drop is dark. Click the sheet to jump there in the demo.</p>
+  <div class="figure" id="cueFigure"><svg id="cueSheet" viewBox="0 0 930 236" role="img" aria-label="Cue sheet of the demo show across 64 bars"></svg></div>
+</section>
+
+<!-- ============ RENDERER ============ -->
+<section class="block" id="renderer">
+  <div class="head">
+    <p class="sysname">RENDERER · WebGPU</p>
+    <h2>Move the pixels to a real GPU pipeline</h2>
+    <p class="measure muted">Keep Go, and replace Ebiten with WebGPU (wgpu-native, the engine behind Firefox's WebGPU) called through zero-cgo bindings. The build stays free of a C toolchain, and the app gets D3D12 or Vulkan, compute, depth, multiple render targets, instancing, indirect draws, GPU timestamps and WGSL shaders that hot-reload.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Option</th><th>What you get</th><th>Cost</th><th>Verdict</th></tr></thead>
+      <tbody>
+        <tr><td>Ebiten + Kage (today)</td><td>2D sprites and fragment shaders; simple build</td><td>8-bit targets, four inputs, no depth, compute or instancing</td><td><span class="tag">Keep until parity</span></td></tr>
+        <tr><td>Go + WebGPU (<code>go-webgpu/webgpu</code>, fallback <code>gogpu/wgpu</code>)</td><td>Everything the look needs, from Go</td><td>Bindings are beta; you write the frame graph</td><td><span class="tag ok">Recommended</span></td></tr>
+        <tr><td>Unreal Engine 5 as renderer</td><td>Lumen, Niagara, MetaHumans; what Anyma's team uses</td><td>A second codebase in C++, a multi-GB runtime, the Go brain bolted on over IPC</td><td><span class="tag acc">Use offline for content</span></td></tr>
+        <tr><td>TouchDesigner or Notch</td><td>Fast visual iteration</td><td>Closed runtime and per-seat licences; not an app you ship</td><td><span class="tag">Look-dev only</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Frame budget: 1440p at 120 Hz on an RTX 4070-class GPU</h3>
+  <p class="measure muted small">These are estimates, to be measured in the Phase 1 spike. Integrated GPUs run a Low tier at 1080p60.</p>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Pass</th><th>What it does</th><th class="num">ms</th></tr></thead>
+      <tbody>
+        <tr><td>Compute prelude</td><td>Audio spectrum history to a texture, particle and vertex-animation updates</td><td class="num">0.6</td></tr>
+        <tr><td>Depth prepass + opaque meshes</td><td>Hero and set, instanced, PBR metal and roughness, clearcoat, emissive</td><td class="num">1.4</td></tr>
+        <tr><td>Shadows</td><td>Two or three cached spot shadows</td><td class="num">0.6</td></tr>
+        <tr><td>SDF raymarch at ½ resolution</td><td>Today's abstract acts, ported to WGSL, depth-aware composite</td><td class="num">1.2</td></tr>
+        <tr><td>Haze</td><td>Froxel volumetrics with temporal reprojection, light shafts, lasers as line lights</td><td class="num">1.0</td></tr>
+        <tr><td>Particles</td><td>1–4 million GPU particles, soft and motion-streaked</td><td class="num">0.8</td></tr>
+        <tr><td>Temporal upscale</td><td>FSR 2 (MIT licence) from about 67% resolution</td><td class="num">0.5</td></tr>
+        <tr><td>Depth of field + motion blur</td><td>Half-resolution bokeh, per-object velocity</td><td class="num">0.6</td></tr>
+        <tr><td>Bloom + lens</td><td>6–8 mip energy-conserving chain, anamorphic streak, halation</td><td class="num">0.4</td></tr>
+        <tr><td>Finish</td><td>AgX tonemap, per-world 3D LUT, film grain, blue-noise dither</td><td class="num">0.2</td></tr>
+        <tr class="total"><td>Total</td><td>Budget is 8.3 ms. Splat worlds (1–2 M splats with a GPU sort, about 2 ms) replace the set geometry in the scenes that use them.</td><td class="num">7.3</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="spec">
+    <div class="stack">
+      <h3>The look recipe</h3>
+      <ul class="clean">
+        <li><strong>HDR all the way.</strong> RGBA16F buffers until the final 8-bit write, so highlights can burn and bloom stays physical.</li>
+        <li><strong>Chrome needs something to reflect.</strong> An HDRI plus "light cards", large emissive strips like a car commercial's softboxes, rendered as analytic area lights (LTC). This is most of why a chrome android looks expensive.</li>
+        <li><strong>Haze is the stage.</strong> Froxel fog lit by spots and lasers is the fastest way to say "concert".</li>
+        <li><strong>Grade per world.</strong> A 3D LUT per world holds the palette to black, white and one accent at a time.</li>
+        <li><strong>No banding in the dark.</strong> Blue-noise dithering before the 8-bit write. Banded near-black gradients are the most common amateur tell.</li>
+        <li><strong>Scale cues.</strong> Tiny human figures at the base make anything monumental. The demo uses 110 of them.</li>
+      </ul>
+    </div>
+    <div class="done">
+      <p class="k">Done when</p>
+      <ul>
+        <li>1440p holds 120 fps with p99 frame time under 8.3 ms on the target GPU</li>
+        <li>No visible banding in 0–5% gray ramps</li>
+        <li>Scene switches never hitch by more than 2 ms</li>
+        <li>Today's three acts run on the new renderer at visual parity</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ FORGE ============ -->
+<section class="block" id="forge">
+  <div class="head">
+    <p class="sysname">FORGE · asynchronous generation</p>
+    <h2>New material for every track, made ahead of need</h2>
+    <p class="measure muted">Nothing expensive runs on the frame's critical path. The forge computes it ahead, caches it forever and swaps it in on a phrase boundary. The musical forecast sets each job's deadline.</p>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Ready in</th><th>Runs on</th><th>Makes</th><th>Appears</th></tr></thead>
+      <tbody>
+        <tr><td>under 1 s</td><td>In-process Go</td><td>Cover palette in OKLab, seeded variations of worlds and SDF forms, the title as 3D type</td><td>From the first bar</td></tr>
+        <tr><td>1–10 s</td><td>ONNX on CPU or NPU, or cloud</td><td>Cover depth and segmentation turned into a layered 2.5D diorama; mood tags; the Claude show script</td><td>By the first build</td></tr>
+        <tr><td>10 s – 4 min</td><td>Local GPU in quiet sections, or cloud</td><td>A sculpture made from the cover by image-to-3D (TRELLIS 2: 20 s to 4 min, MIT licence); a 360° sky for reflections</td><td>Second drop, or the next play</td></tr>
+        <tr><td>Minutes to overnight</td><td>Cloud, or the PC while idle</td><td>Gaussian-splat worlds (Marble exports 0.5–2 M splats as SPZ or PLY); hero passes rendered in Blender or Unreal; simulations baked to vertex-animation textures</td><td>Content packs, next session</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="grid cols-3">
+    <div class="card"><p class="k">Deadlines</p><p>Jobs are scheduled against "needed by" times from the forecast. A job that misses its deadline falls back to the library, and the frame never waits.</p></div>
+    <div class="card"><p class="k">Quality gate</p><p>Each asset is rendered to a thumbnail offscreen and scored by an aesthetic model plus art-direction checks (black level, contrast, palette). Rejects never reach the screen.</p></div>
+    <div class="card"><p class="k">GPU contention</p><p>Generation runs on the NPU or CPU through Windows ML, in low-intensity sections, or in the cloud. The render thread keeps priority, and generation pauses during drops.</p></div>
+    <div class="card"><p class="k">Cache</p><p>Everything is keyed by a hash of its inputs, so nothing is generated twice. Songs you replay get richer each time, and idle time pre-generates for recent tracks.</p></div>
+    <div class="card"><p class="k">Frontier, optional</p><p>Real-time diffusion (StreamDiffusion reaches 55–60 fps at 512² on an RTX 4090; SANA-Streaming does 1280×704 at 24 fps on an RTX 5090) can paint "dream" breakdowns. It saturates a whole GPU, so it only runs on a second GPU or in the cloud.</p></div>
+    <div class="card"><p class="k">Done when</p><p>A new track has its first generated asset on screen by the first drop, and no frame exceeds the budget because of generation.</p></div>
+  </div>
+</section>
+
+<!-- ============ VAULT ============ -->
+<section class="block" id="vault">
+  <div class="head">
+    <p class="sysname">VAULT · asset bank</p>
+    <h2>What gets made once and reused forever</h2>
+  </div>
+  <div class="grid cols-3">
+    <div class="card"><p class="k">Hero pack</p><p>A chrome android bust, hands, wings, monoliths, halo rings, a cathedral and a corridor. Each comes with poses and blend shapes (awaken, breathe, turn) and baked simulations (shatter, cloth wings, fluid) as vertex-animation textures.</p></div>
+    <div class="card"><p class="k">Sources</p><p>Poly Haven HDRIs and textures (CC0), licensed models from Fab or Sketchfab, and MetaHumans, which may be used outside Unreal since Epic's 2025 licence change. Every asset records its licence.</p></div>
+    <div class="card"><p class="k">Formats</p><p>glTF with meshopt compression, KTX2/BasisU textures, vertex-animation textures as 16-bit images, SPZ splats. Song Memory lives in SQLite through a pure-Go driver.</p></div>
+  </div>
+</section>
+
+<!-- ============ MOMENTS ============ -->
+<section class="block" id="moments">
+  <div class="head">
+    <p class="eyebrow">Signature moments</p>
+    <h2>Six things people will film</h2>
+  </div>
+  <div class="grid cols-3">
+    <div class="card"><h3>The Awakening</h3><p>A colossal chrome android stands in haze. Its eyes ignite on the first drop's beat 1, and its head turns on phrase boundaries.</p></div>
+    <div class="card"><h3>Cover Monument</h3><p>The album cover becomes a 3D diorama, then a sculpture. The camera flies into it at the second drop.</p></div>
+    <div class="card"><h3>Disintegration</h3><p>The hero breaks into two million particles in the breakdown and re-forms on the next drop's beat 1. The demo does this with chrome shards.</p></div>
+    <div class="card"><h3>The Box</h3><p>Off-axis projection, optionally head-tracked with a webcam, turns the screen into a window, and the figure reaches out of the frame. It's Anyma's fourth-wall trick, for one viewer.</p></div>
+    <div class="card"><h3>Laser Cathedral</h3><p>Volumetric lasers in haze, driven by the hats and reflected in chrome.</p></div>
+    <div class="card"><h3>The Room</h3><p>Hue Entertainment, WLED over DDP (about 2 ms on local Wi-Fi) and DMX over Art-Net or sACN follow the director's cues, so the show fills the room.</p></div>
+  </div>
+</section>
+
+<!-- ============ PERFORMANCE ============ -->
+<section class="block" id="performance">
+  <div class="head">
+    <p class="eyebrow">Performance playbook</p>
+    <h2>How great visuals stay fast</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Trick</th><th>Why it pays</th></tr></thead>
+      <tbody>
+        <tr><td>Render at about 67% and upscale temporally</td><td>Roughly halves pixel cost. Haze, bloom and grain hide the rest.</td></tr>
+        <tr><td>Reuse last frame's work</td><td>Haze, ambient occlusion, raymarching and splat sorting update across several frames instead of one.</td></tr>
+        <tr><td>Bake what doesn't depend on audio</td><td>Simulations as vertex-animation textures, lighting, SDF volumes, LUTs and noise cost nothing at runtime.</td></tr>
+        <tr><td>Keep particles and splats on the GPU</td><td>A compute simulation plus indirect draws means the CPU never touches millions of points.</td></tr>
+        <tr><td>Prewarm on the musical forecast</td><td>The director knows the next shot a phrase ahead, so it compiles pipelines and streams assets then.</td></tr>
+        <tr><td>Compress assets</td><td>KTX2/BasisU textures and meshopt meshes cut VRAM use and upload time.</td></tr>
+        <tr><td>No allocations per frame</td><td>Use fixed uniform structs and lock-free triple buffers between the audio, director and render threads.</td></tr>
+        <tr><td>Pace frames evenly</td><td>Keep one frame in flight with FIFO present. Stutter looks cheaper than a lower frame rate.</td></tr>
+        <tr><td>Keep ML off the render GPU</td><td>Windows ML on the NPU or CPU, or the cloud. Generation pauses during drops.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ ROADMAP ============ -->
+<section class="block" id="roadmap">
+  <div class="head">
+    <p class="eyebrow">Roadmap</p>
+    <h2>Seven phases, each shipping a better-looking app</h2>
+    <p class="measure muted small">Durations are rough, for one developer working with AI assistance. The current app keeps running throughout, because the new renderer sits behind an interface until it reaches parity.</p>
+  </div>
+  <div class="phases">
+    <div class="phase"><p class="n">0<small>1 week</small></p><div><h3>Foundations</h3><ul><li>Fix the defects listed above</li><li>Record and replay audio features for repeatable testing</li><li>A metrics HUD and a 30-track test set</li></ul></div><div class="dw"><p class="k">Done when</p><p>Beat phase is locked to the music, visuals rest on pause, and a replayed session is deterministic.</p></div></div>
+    <div class="phase"><p class="n">1<small>2–3 weeks</small></p><div><h3>Engine spike and migration</h3><ul><li>A WebGPU spike on your GPU: HDR, a bloom chain, 1 M compute particles, a mesh with depth</li><li>Port the three acts to WGSL at ½ resolution with upscaling</li><li>The budget governor</li></ul></div><div class="dw"><p class="k">Done when</p><p>Parity visuals at 1440p and 120 fps, with no banding.</p></div></div>
+    <div class="phase"><p class="n">2<small>3–4 weeks</small></p><div><h3>The look</h3><ul><li>glTF hero pipeline, PBR, light cards and IBL</li><li>Haze, lasers, particles, depth of field and grading</li><li>The first world: Chrome Colossus</li></ul></div><div class="dw"><p class="k">Done when</p><p>In a blind A/B against reference stills, viewers can't pick ours as the amateur one.</p></div></div>
+    <div class="phase"><p class="n">3<small>3 weeks</small></p><div><h3>The director</h3><ul><li>The musical clock, sections and drop forecast</li><li>The grammar, shot library and reaction budget</li><li>Latency calibration and Song Memory</li></ul></div><div class="dw"><p class="k">Done when</p><p>The drop-cut accuracy targets from the Director section are met.</p></div></div>
+    <div class="phase"><p class="n">4<small>4+ weeks</small></p><div><h3>The forge</h3><ul><li>The job system and the vault</li><li>Cover dioramas, generated skies and the Claude show writer</li><li>The quality gate, image-to-3D and splat worlds</li></ul></div><div class="dw"><p class="k">Done when</p><p>The first generated asset is on screen by the first drop, and generation never breaks the budget.</p></div></div>
+    <div class="phase"><p class="n">5<small>2 weeks</small></p><div><h3>Beyond the screen</h3><ul><li>DMX, Hue and WLED output</li><li>Box mode with head tracking</li><li>A control screen plus a fullscreen output, and Spout or NDI for OBS</li></ul></div><div class="dw"><p class="k">Done when</p><p>Room lights match the screen within one frame after latency compensation.</p></div></div>
+    <div class="phase"><p class="n">6<small>ongoing</small></p><div><h3>Frontier</h3><ul><li>A real-time diffusion pass on a second GPU or in the cloud</li><li>ML stems and beat tracking on the NPU</li></ul></div><div class="dw"><p class="k">Done when</p><p>Each experiment ships behind a switch with a non-ML fallback.</p></div></div>
+  </div>
+</section>
+
+<!-- ============ RISKS ============ -->
+<section class="block" id="risks">
+  <div class="head">
+    <p class="eyebrow">Risks</p>
+    <h2>What could sink it, and the plan for each</h2>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr><td>Go WebGPU bindings are beta</td><td>A spike in week one, a thin renderer interface, and fallbacks: <code>gogpu/wgpu</code> with its Rust backend, or cgo bindings.</td></tr>
+        <tr><td>Art quality depends on assets and direction, not code</td><td>Reference boards and look-dev come before features. Curate or commission the hero pack.</td></tr>
+        <tr><td>Local AI competes with rendering for the GPU</td><td>The NPU, CPU or cloud; throttling in quiet sections; deadlines with library fallbacks.</td></tr>
+        <tr><td>Beat tracking fails on ambient or non-4/4 music</td><td>Confidence gating. The director switches to a free-flowing mode without hard cuts.</td></tr>
+        <tr><td>Licences</td><td>Terms differ (TRELLIS is MIT; Hunyuan3D has regional limits; MetaHuman has its own). Record the licence of every asset in the vault.</td></tr>
+        <tr><td>Vendor APIs change or disappear</td><td>Every generator is optional and cached, and each has a local fallback.</td></tr>
+        <tr><td>Strobes and photosensitive viewers</td><td>A global strobe limit (no more than 3 flashes per second), a switch to turn it off, and reduced-motion respected by default.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ============ SOURCES ============ -->
+<section class="block" id="sources">
+  <div class="head"><p class="eyebrow">Sources</p><h2>Where the facts come from</h2></div>
+  <ul class="sources">
+    <li><a href="https://ymcinema.com/2025/01/30/the-making-of-anymas-the-end-of-genesys-at-the-las-vegas-sphere-a-groundbreaking-fusion-of-music-and-technology/" target="_blank" rel="noopener">Y.M.Cinema: The making of The End of Genesys</a></li>
+    <li><a href="https://virtualproduction.services/how-anymas-live-shows-use-unreal-engine-to-create-a-cybernetic-opera/" target="_blank" rel="noopener">How Anyma's live shows use Unreal Engine</a></li>
+    <li><a href="https://news.pollstar.com/2025/01/01/anyma-at-sphere-the-future-is-here/" target="_blank" rel="noopener">Pollstar: Anyma at Sphere</a></li>
+    <li><a href="https://www.rollingstone.com/music/music-news/anyma-will-become-first-electronic-act-headline-sphere-1235060677/" target="_blank" rel="noopener">Rolling Stone: Anyma headlines the Sphere</a></li>
+    <li><a href="https://www.collater.al/en/anyma-afterlife-genesys-sphere-las-vegas-new-year-alessio-de-vecchi-visual-art/" target="_blank" rel="noopener">Collater.al: Alessio De Vecchi and Genesys</a></li>
+    <li><a href="https://github.com/go-webgpu/webgpu" target="_blank" rel="noopener">go-webgpu/webgpu (zero-cgo wgpu-native bindings)</a></li>
+    <li><a href="https://github.com/gogpu/wgpu" target="_blank" rel="noopener">gogpu/wgpu (pure-Go WebGPU)</a></li>
+    <li><a href="https://pkg.go.dev/github.com/saltosystems/winrt-go/windows/media/control" target="_blank" rel="noopener">winrt-go: Windows.Media.Control</a></li>
+    <li><a href="https://learn.microsoft.com/en-us/windows/win32/api/audioclientactivationparams/ns-audioclientactivationparams-audioclient_process_loopback_params" target="_blank" rel="noopener">Microsoft: process loopback capture</a></li>
+    <li><a href="https://github.com/mjhydri/BeatNet" target="_blank" rel="noopener">BeatNet</a> and <a href="https://arxiv.org/abs/2312.17156" target="_blank" rel="noopener">BEAST</a> online beat tracking</li>
+    <li><a href="https://arxiv.org/abs/2402.17701" target="_blank" rel="noopener">HS-TasNet</a> and <a href="https://github.com/sweetspotsoundsystem/stemgen-rt" target="_blank" rel="noopener">StemgenRT</a> real-time stems</li>
+    <li><a href="https://github.com/mir-aidj/all-in-one" target="_blank" rel="noopener">All-In-One music structure analyzer</a></li>
+    <li><a href="https://blogs.windows.com/windowsdeveloper/2025/09/23/windows-ml-is-generally-available-empowering-developers-to-scale-local-ai-across-windows-devices/" target="_blank" rel="noopener">Windows ML general availability</a></li>
+    <li><a href="https://github.com/shota3506/onnxruntime-purego" target="_blank" rel="noopener">onnxruntime-purego</a></li>
+    <li><a href="https://www.3daistudio.com/blog/trellis-2-vs-hunyuan-3d-differences-explained" target="_blank" rel="noopener">TRELLIS 2 vs Hunyuan 3D</a></li>
+    <li><a href="https://docs.worldlabs.ai/marble/export/gaussian-splat/index" target="_blank" rel="noopener">World Labs Marble: splat export</a></li>
+    <li><a href="https://github.com/KeKsBoTer/web-splat" target="_blank" rel="noopener">web-splat</a> and <a href="https://blog.playcanvas.com/new-in-supersplat-webgpu-and-streaming-bring-huge-performance-wins/" target="_blank" rel="noopener">SuperSplat WebGPU</a> performance</li>
+    <li><a href="https://github.com/cumulo-autumn/StreamDiffusion" target="_blank" rel="noopener">StreamDiffusion</a>, <a href="https://arxiv.org/abs/2511.07399" target="_blank" rel="noopener">StreamDiffusionV2</a>, <a href="https://www.alphaxiv.org/overview/2605.30409" target="_blank" rel="noopener">SANA-Streaming</a></li>
+    <li><a href="https://gpuopen.com/fidelityfx-superresolution-2/" target="_blank" rel="noopener">AMD FSR 2 (MIT)</a></li>
+    <li><a href="https://iotech.blog/posts/philips-hue-entertainment-api/" target="_blank" rel="noopener">Hue Entertainment API</a> and <a href="https://kno.wled.ge/interfaces/ddp/" target="_blank" rel="noopener">WLED DDP</a></li>
+    <li><a href="https://www.cgchannel.com/2025/06/you-can-now-sell-metahumans-or-use-them-in-unity-or-godot/" target="_blank" rel="noopener">CG Channel: MetaHuman licence change</a></li>
+  </ul>
+</section>
+
+<footer>Plan for <code>mhvn092/Audio-Visualizer</code>. The demo runs on three.js 0.170 loaded from jsDelivr, and its music is synthesized in your browser.</footer>
+</div>
+
+<script>
+/* Score, director and cue sheet. Plain script so the cue sheet renders even if WebGL is unavailable. */
+(function(){
+'use strict';
+const BPM=124, BEAT=60/BPM, TOTAL_BARS=64, TOTAL_BEATS=TOTAL_BARS*4;
+const SECTIONS=[
+  {id:'intro',name:'Intro',label:'Reveal',start:0,end:8},
+  {id:'build',name:'Build',label:'Tension',start:8,end:16},
+  {id:'drop',name:'Drop 1',label:'Awakening',start:16,end:32},
+  {id:'break',name:'Breakdown',label:'Dissolve',start:32,end:40},
+  {id:'build2',name:'Build 2',label:'Gather',start:40,end:44},
+  {id:'drop2',name:'Drop 2',label:'Reform',start:44,end:60},
+  {id:'outro',name:'Outro',label:'Recede',start:60,end:64}
+];
+const SHOTS=[
+  {start:0,end:8,id:'reveal'},{start:8,end:12,id:'crowd'},{start:12,end:14,id:'profile'},{start:14,end:15.5,id:'seam'},{start:15.5,end:16,id:'breath'},
+  {start:16,end:20,id:'wide'},{start:20,end:24,id:'seam'},{start:24,end:28,id:'top'},{start:28,end:32,id:'crowd'},
+  {start:32,end:36,id:'profile'},{start:36,end:40,id:'seamslow'},{start:40,end:43.5,id:'reveal2'},{start:43.5,end:44,id:'breath'},
+  {start:44,end:48,id:'wide'},{start:48,end:52,id:'top'},{start:52,end:56,id:'crowd'},{start:56,end:60,id:'wide2'},{start:60,end:64,id:'pullback'}
+];
+const SHOT_NAMES={reveal:'Reveal push-in',reveal2:'Push-in',crowd:'Crowd POV',profile:'Telephoto profile',seam:'Seam close-up',seamslow:'Seam close-up',breath:'Blackout',wide:'Monumental wide',wide2:'Low orbit',top:'Overhead',pullback:'Pull back'};
+const SHOT_SHORT={reveal:'Reveal',reveal2:'Push',crowd:'Crowd',profile:'Side',seam:'Seam',seamslow:'Seam',breath:'',wide:'Wide',wide2:'Orbit',top:'Top',pullback:'Pull'};
+const CHORDS=[{root:33,notes:[57,60,64]},{root:29,notes:[53,57,60]},{root:36,notes:[60,64,67]},{root:31,notes:[55,59,62]}];
+const MELODY=[[0,76,2],[2,74,1],[3,72,1],[4,69,4],[8,72,2],[10,69,1],[11,72,1],[12,77,4],[16,79,2],[18,76,1],[19,74,1],[20,72,4],[24,74,2],[26,71,1],[27,74,1],[28,76,4]];
+
+function secAt(bar){for(const s of SECTIONS){if(bar>=s.start&&bar<s.end)return s;}return SECTIONS[SECTIONS.length-1];}
+function shotAt(bar){for(const s of SHOTS){if(bar>=s.start&&bar<s.end)return s;}return SHOTS[SHOTS.length-1];}
+
+const EV=[];
+const add=(b,type,o)=>{EV.push(Object.assign({b:b,type:type},o||{}));};
+for(let bar=0;bar<TOTAL_BARS;bar++){
+  const s=secAt(bar), id=s.id, B=bar*4, ch=CHORDS[Math.floor(bar/2)%4];
+  const isDrop=id==='drop'||id==='drop2';
+  if(bar%2===0){
+    let vel=isDrop?0.45:0.8;
+    if(id==='outro')vel=0.8*(1-(bar-s.start)/(s.end-s.start));
+    add(B,'pad',{notes:ch.notes,dur:8,vel:vel});
+  }
+  const kickOn=isDrop||(id==='build'&&bar<14)||(id==='build2'&&bar<43)||(id==='outro'&&bar<62);
+  if(kickOn)for(let i=0;i<4;i++)add(B+i,'kick',{vel:isDrop?1:0.7});
+  if(isDrop){
+    add(B+1,'clap');add(B+3,'clap');
+    for(let i=0;i<16;i++){const o=i/4;if(i%4===2)add(B+o,'hat',{open:true,vel:0.42});else add(B+o,'hat',{vel:i%2?0.12:0.2});}
+    for(let i=0;i<4;i++)add(B+i+0.5,'bass',{note:ch.root,dur:0.42});
+    add(B+1.5,'stab',{notes:ch.notes.map(n=>n+12)});
+    if(bar%2===1)add(B+3.5,'stab',{notes:ch.notes.map(n=>n+12)});
+  }else if((id==='intro'&&bar>=4)||(id==='build'&&bar<14)||id==='outro'){
+    for(let i=0;i<4;i++)add(B+i+0.5,'hat',{vel:0.16});
+  }
+}
+function roll(startBar,steps){
+  steps.forEach((step,k)=>{
+    const bar=startBar+k, lim=(k===steps.length-1)?2:4;
+    for(let o=0;o<lim-1e-9;o+=step)add(bar*4+o,'snare',{vel:0.25+0.75*((k+o/4)/steps.length)});
+  });
+}
+roll(8,[1,1,1,1,0.5,0.5,0.25,0.25]);
+roll(40,[0.5,0.25,0.25,0.25]);
+add(32,'riser',{dur:30});add(160,'riser',{dur:14});
+add(64,'impact');add(176,'impact');
+MELODY.forEach(m=>add(128+m[0],'lead',{note:m[1],dur:m[2],vel:0.5,soft:true}));
+[176,208].forEach(base=>MELODY.forEach(m=>add(base+m[0],'lead',{note:m[1],dur:m[2],vel:0.36})));
+EV.sort((a,b)=>a.b-b.b);
+
+const times=t=>EV.filter(e=>e.type===t).map(e=>e.b);
+const KICK=times('kick'),CLAP=times('clap'),HAT=times('hat'),SNARE=times('snare'),CHORD=times('pad'),LEAD=times('lead');
+// Photosensitivity limit: strobe hits at least 1.2 beats (0.58 s) apart, so never more than two flashes in any second
+const STROBE=[];SNARE.forEach(b=>{if(!STROBE.length||b-STROBE[STROBE.length-1]>=1.2)STROBE.push(b);});
+
+const clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
+const sm=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+const lerp=(a,b,t)=>a+(b-a)*t;
+const mix3=(a,b,t)=>[lerp(a[0],b[0],t),lerp(a[1],b[1],t),lerp(a[2],b[2],t)];
+function lastLE(arr,x){let lo=0,hi=arr.length-1,r=-1;while(lo<=hi){const m=(lo+hi)>>1;if(arr[m]<=x){r=m;lo=m+1;}else hi=m-1;}return r;}
+function env(arr,x,decay){const i=lastLE(arr,x);return i<0?0:Math.exp(-(x-arr[i])/decay);}
+
+function camera(shot,u,x){
+  const e=sm(u), hx=Math.sin(x*0.61)*0.04+Math.sin(x*0.23)*0.05, hy=Math.sin(x*0.47+1.3)*0.03;
+  switch(shot.id){
+    case 'reveal':return{p:[0,lerp(0.9,1.8,e),lerp(36,20,e)],l:[0,lerp(4.4,5.0,e),0],f:28};
+    case 'reveal2':return{p:[0,lerp(1.2,1.6,e),lerp(28,17,e)],l:[0,4.8,0],f:30};
+    case 'crowd':return{p:[lerp(2.2,1.2,e)+hx,0.55+hy,lerp(13.5,11.8,e)],l:[0,6.2,0],f:46};
+    case 'profile':return{p:[lerp(16,13.5,e),lerp(2.0,2.8,e),lerp(2.0,5.0,e)],l:[0,4.6,0],f:22};
+    case 'seam':return{p:[lerp(1.5,0.9,e),lerp(3.0,5.4,e),lerp(3.6,2.7,e)],l:[0,lerp(4.2,4.9,e),0.45],f:30};
+    case 'seamslow':return{p:[lerp(-1.3,-0.8,e),lerp(5.6,4.2,e),lerp(3.4,2.9,e)],l:[0,4.6,0.45],f:30};
+    case 'breath':return{p:[0,1.1,17],l:[0,4.6,0],f:32};
+    case 'wide':{const a=lerp(-0.42,0.42,u);return{p:[Math.sin(a)*17,2.6,Math.cos(a)*17],l:[0,4.3,0],f:34};}
+    case 'wide2':{const a=lerp(0.75,-0.55,u);return{p:[Math.sin(a)*12.5,1.2,Math.cos(a)*12.5],l:[0,5.0,0],f:40};}
+    case 'top':return{p:[lerp(0.6,-0.6,u),lerp(25,21,e),lerp(7.5,6.0,e)],l:[0,0.5,-0.5],f:42};
+    default:return{p:[0,lerp(2.0,4.5,e),lerp(18,42,e)],l:[0,4.6,0],f:30};
+  }
+}
+const ORBIT_SPEED={intro:0.15,build:0.3,drop:1.0,break:0.25,build2:0.45,drop2:1.15,outro:0.35};
+function orbitPhase(x){let ph=0;for(const s of SECTIONS){const a=s.start*4,b=s.end*4;if(x<=a)break;ph+=ORBIT_SPEED[s.id]*(Math.min(x,b)-a);}return ph*0.11;}
+
+const WHITE=[1,1,1],ICE=[0.72,0.84,1.0],RED=[1.0,0.1,0.06],AMBER=[1.0,0.55,0.22];
+
+function state(x,opts){
+  opts=opts||{};const strobe=opts.strobe!==false;
+  x=((x%TOTAL_BEATS)+TOTAL_BEATS)%TOTAL_BEATS;
+  const bar=x/4, sec=secAt(bar), sp=(bar-sec.start)/(sec.end-sec.start);
+  const shot=shotAt(bar), su=(bar-shot.start)/(shot.end-shot.start);
+  const kick=env(KICK,x,0.28), hat=env(HAT,x,0.1), snare=env(STROBE,x,0.16), lead=env(LEAD,x,1.6);
+  const S={x:x,bar:bar,sec:sec,sp:sp,shot:shot,su:su,cam:camera(shot,su,x),orbit:orbitPhase(x),
+    key:0,rim:0,rimColor:ICE,env:0.5,fog:0.045,exposure:1,flash:0,bloom:0.8,
+    god:0,beams:0,beamCount:0,spread:0,sweep:0,beamColor:ICE,
+    lasers:0,laserFan:0.3,laserColor:RED,
+    seam:0,seamGrow:1,halo:0,haloColor:WHITE,haloSpin:x*0.012,ring:0,ringColor:WHITE,
+    shardScale:0,dissolve:0,radius:1,crowd:0,spark:0,dust:0.35,kick:kick,hat:hat,snare:snare};
+  const cut=x-shot.start*4;
+  switch(sec.id){
+    case 'intro':
+      S.key=0.12+0.45*sm(sp*1.3);S.rim=0.35*sp;S.env=0.25+0.35*sp;S.fog=0.05;S.god=0.7+0.4*sm(sp);
+      S.halo=0.25*sm(sp);S.ring=0.12*sp;S.dust=0.3;break;
+    case 'build':case 'build2':{
+      const b2=sec.id==='build2', breath=bar>=(b2?43.5:15.5);
+      S.key=lerp(b2?0.5:0.6,1.05,sp);S.rim=lerp(b2?0.6:0.4,1.05,sp);S.rimColor=mix3(b2?AMBER:ICE,WHITE,sp);S.env=0.5+0.4*sp;S.fog=lerp(0.048,0.034,sp);
+      S.beamCount=6;S.beams=lerp(0.22,0.5,sm(sp));S.spread=1-sm(sp);S.beamColor=mix3(b2?AMBER:ICE,WHITE,sp);
+      S.flash=strobe?snare*(0.04+0.42*sp*sp):0;S.seam=(b2?0.6:0)+0.7*snare*sp;S.halo=0.3+0.6*sp;S.ring=0.2+0.4*sp;
+      if(b2){S.shardScale=1;S.dissolve=1-0.1*sm(sp);S.radius=1-0.35*sm(sp);}
+      else{S.shardScale=sm(sp*1.2);S.radius=1.8-0.8*sm(sp);S.god=0.4*(1-sp);}
+      S.dust=0.42;S.haloSpin=x*0.03;
+      if(breath){S.key=0;S.beams=0;S.flash=0;S.seam=0;S.halo=0;S.ring=0;S.god=0;S.rim=1.5;S.rimColor=WHITE;S.exposure=0.55;S.env=0.08;}
+      break;}
+    case 'drop':case 'drop2':{
+      const d2=sec.id==='drop2', since=x-sec.start*4;
+      S.key=0.45+1.15*kick;S.rim=1.0;S.rimColor=d2?RED:ICE;S.env=0.95;S.fog=0.03;S.bloom=0.95;
+      S.beamCount=6;S.beams=0.72;S.spread=0.55+0.45*Math.sin(x*Math.PI/8);S.sweep=Math.sin(x*Math.PI/16);S.beamColor=d2?WHITE:ICE;
+      S.lasers=0.5+0.9*hat;S.laserFan=0.28+0.22*Math.sin(x*Math.PI/8);S.laserColor=d2?(Math.floor(bar)%2?RED:WHITE):RED;
+      S.seamGrow=sm(since);S.seam=(d2?6.5:5)*(1+0.08*Math.sin(x*0.8));
+      S.halo=(d2?2.2:1.5)+3*Math.exp(-since/2);S.haloColor=d2?RED:WHITE;S.ring=1.1;S.ringColor=d2?RED:WHITE;S.haloSpin=x*0.05;
+      S.shardScale=1;S.radius=d2?1-0.35*(1-sm(since/1.5)):1;S.dissolve=d2?0.9*(1-sm(since/1.5)):0;S.crowd=1;S.spark=0.8;S.dust=0.3;
+      if(strobe)S.flash=Math.max(Math.exp(-since/0.35),cut<2?0.22*Math.exp(-cut/0.25):0);
+      else S.exposure=1+0.35*Math.exp(-since/0.35);
+      break;}
+    case 'break':
+      S.key=0.35+0.1*Math.sin(x*0.2);S.rim=0.9;S.rimColor=AMBER;S.env=0.6;S.fog=0.056;
+      S.beamCount=2;S.beams=0.4;S.spread=0.3;S.beamColor=AMBER;
+      S.seam=0.8+2.4*lead;S.halo=0.55;S.haloColor=AMBER;S.ring=0.28;S.ringColor=AMBER;S.haloSpin=x*0.015;
+      S.shardScale=1;S.dissolve=sm(sp*1.6);S.dust=0.6;S.spark=0.15;break;
+    default:{
+      const f=1-sm(sp);
+      S.key=0.45*f;S.rim=0.6*f;S.env=0.3+0.4*f;S.fog=lerp(0.04,0.075,sp);S.beamCount=2;S.beams=0.3*f;S.spread=0.4;
+      S.seam=3*f;S.halo=0.5*f;S.haloColor=RED;S.ring=0.4*f;S.ringColor=RED;S.shardScale=f;S.dissolve=0.5*(1-f);S.dust=0.5;S.exposure=0.4+0.6*f;}
+  }
+  // close-up lighting: darker metal so the seam carries the frame
+  if(shot.id==='seam'||shot.id==='seamslow'){S.env*=0.35;S.key*=0.4;S.beams=0;S.god=0;S.seam*=0.6;}
+  return S;
+}
+
+function plural(n,w){return n+' '+w+(n===1?'':'s');}
+function span(beats){
+  if(beats>=4){const bars=Math.floor(beats/4), rem=Math.floor(beats%4);return plural(bars,'bar')+(rem?' '+plural(rem,'beat'):'');}
+  return plural(Math.max(1,Math.ceil(beats)),'beat');
+}
+function hud(x){
+  x=((x%TOTAL_BEATS)+TOTAL_BEATS)%TOTAL_BEATS;
+  const bar=x/4, sec=secAt(bar), shot=shotAt(bar);
+  const si=SECTIONS.indexOf(sec), nsec=SECTIONS[(si+1)%SECTIONS.length];
+  const shi=SHOTS.indexOf(shot), nshot=SHOTS[(shi+1)%SHOTS.length];
+  let toCut=nshot.start*4-x;if(toCut<=0)toCut+=TOTAL_BEATS;
+  let toSec=nsec.start*4-x;if(toSec<=0)toSec+=TOTAL_BEATS;
+  return{section:sec.name,label:sec.label,isDrop:sec.id.indexOf('drop')===0,
+    pos:'Bar '+(Math.floor(bar-sec.start)+1)+'/'+(sec.end-sec.start)+' · Beat '+(Math.floor(x%4)+1),
+    shot:'Shot: '+SHOT_NAMES[shot.id],
+    nextCut:'Next cut: '+SHOT_NAMES[nshot.id]+' in '+span(toCut),
+    nextSec:'Next section: '+nsec.name+' in '+span(toSec),nextIsDrop:nsec.id.indexOf('drop')===0};
+}
+
+/* ---- cue sheet ---- */
+const NS='http://www.w3.org/2000/svg';
+function el(name,attrs,parent,text){const n=document.createElementNS(NS,name);for(const k in attrs)n.setAttribute(k,attrs[k]);if(text!=null)n.textContent=text;if(parent)parent.appendChild(n);return n;}
+const LANES=[
+  {label:'Key light ← kick',f:S=>S.key},
+  {label:'Strobe ← snare',f:S=>S.flash},
+  {label:'Lasers ← hats',f:S=>S.lasers},
+  {label:'Hero seam ← melody',f:S=>S.seam*S.seamGrow},
+  {label:'Beams',f:S=>S.beams+S.god*0.6},
+  {label:'Shards: orbit, dissolve',f:S=>S.shardScale*(1-0.65*S.dissolve)}
+];
+function drawCueSheet(){
+  const svg=document.getElementById('cueSheet');if(!svg)return;
+  const X0=170,CW=11.5,RH=24,Y0=10;
+  const colOf=b=>X0+b*CW;
+  // section row
+  el('text',{class:'cue-label',x:8,y:Y0+15},svg,'Section');
+  SECTIONS.forEach(s=>{
+    const isDrop=s.id.indexOf('drop')===0;
+    el('rect',{x:colOf(s.start)+0.5,y:Y0,width:(s.end-s.start)*CW-1,height:RH-4,rx:2,style:isDrop?'fill:var(--hot);fill-opacity:0.3;stroke:var(--line)':'fill:var(--panel-2);stroke:var(--line)'},svg);
+    el('text',{class:'cue-sec',x:colOf(s.start)+5,y:Y0+14},svg,(s.end-s.start)>=6?s.name:s.name.replace('Build 2','B2').replace('Outro','Out'));
+  });
+  // camera row
+  const yc=Y0+RH;
+  el('text',{class:'cue-label',x:8,y:yc+15},svg,'Camera cuts');
+  SHOTS.forEach(s=>{
+    const w=(s.end-s.start)*CW-1;
+    el('rect',{x:colOf(s.start)+0.5,y:yc,width:w,height:RH-4,rx:2,style:s.id==='breath'?'fill:#000;stroke:var(--line)':'fill:var(--panel);stroke:var(--line)'},svg);
+    if(w>30)el('text',{class:'cue-label',x:colOf(s.start)+4,y:yc+14},svg,SHOT_SHORT[s.id]);
+  });
+  // lanes
+  const samples=16;
+  LANES.forEach((lane,li)=>{
+    const y=Y0+RH*(2+li);
+    el('text',{class:'cue-label',x:8,y:y+15},svg,lane.label);
+    const vals=[];let max=0;
+    for(let b=0;b<TOTAL_BARS;b++){let m=0;for(let k=0;k<samples;k++){const v=lane.f(state(b*4+k*4/samples));if(v>m)m=v;}vals.push(m);if(m>max)max=m;}
+    vals.forEach((v,b)=>{const a=max>0?v/max:0;if(a<0.02)return;
+      el('rect',{x:colOf(b)+0.75,y:y+2,width:CW-1.5,height:RH-8,rx:1.5,style:'fill:'+(li===1?'var(--fg)':(li===2?'var(--hot)':'var(--accent)'))+';fill-opacity:'+(0.12+0.88*a).toFixed(3)},svg);});
+  });
+  // bar grid every 4 bars
+  const yEnd=Y0+RH*(2+LANES.length);
+  for(let b=0;b<=TOTAL_BARS;b+=4){el('line',{class:'cue-grid',x1:colOf(b),x2:colOf(b),y1:Y0+RH*2-2,y2:yEnd},svg);
+    el('text',{class:'cue-label',x:colOf(b)-(b>=10?6:3),y:yEnd+14},svg,String(b));}
+  el('line',{id:'cuePlay',class:'cue-play',x1:colOf(17.25),x2:colOf(17.25),y1:Y0-4,y2:yEnd+2},svg);
+  svg.setAttribute('viewBox','0 0 '+(X0+TOTAL_BARS*CW+10)+' '+(yEnd+22));
+  svg.style.cursor='pointer';
+  svg.addEventListener('click',ev=>{
+    const pt=svg.createSVGPoint();pt.x=ev.clientX;pt.y=ev.clientY;const p=pt.matrixTransform(svg.getScreenCTM().inverse());
+    const bar=clamp((p.x-X0)/CW,0,TOTAL_BARS-0.01);
+    if(window.COLOSSUS.onSeek)window.COLOSSUS.onSeek(Math.floor(bar)*4);
+  });
+  window.COLOSSUS.setPlayhead=function(x){const b=(((x%TOTAL_BEATS)+TOTAL_BEATS)%TOTAL_BEATS)/4;const l=document.getElementById('cuePlay');if(l){l.setAttribute('x1',colOf(b));l.setAttribute('x2',colOf(b));}};
+}
+
+window.COLOSSUS={BPM:BPM,BEAT:BEAT,TOTAL_BARS:TOTAL_BARS,TOTAL_BEATS:TOTAL_BEATS,SECTIONS:SECTIONS,SHOTS:SHOTS,EV:EV,state:state,hud:hud,onSeek:null,setPlayhead:function(){}};
+drawCueSheet();
+setTimeout(()=>{const f=document.getElementById('stageFallback');if(f&&!f.hidden)f.textContent='The live demo could not load its 3D library here. The plan below is complete without it.';},12000);
+
+// section chips
+const chips=document.getElementById('chips');
+SECTIONS.forEach(s=>{const b=document.createElement('button');b.type='button';b.className='chip'+(s.id.indexOf('drop')===0?' is-drop':'');b.textContent=s.name;b.setAttribute('aria-label','Play from '+s.name);
+  b.addEventListener('click',()=>{if(window.COLOSSUS.onSeek)window.COLOSSUS.onSeek(s.start*4);});chips.appendChild(b);});
+})();
+</script>
+
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js", "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/" } }
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+
+const C = window.COLOSSUS;
+const BEAT = C.BEAT;
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('stageCanvas');
+const fallback = document.getElementById('stageFallback');
+const $ = id => document.getElementById(id);
+const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+let renderer;
+try {
+  renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance' });
+} catch (err) {
+  fallback.textContent = 'The live demo needs WebGL 2, which this browser did not provide. The plan below is complete without it.';
+  throw err;
+}
+renderer.setClearColor(0x040506, 1);
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.AgXToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+const scene = new THREE.Scene();
+const FOG = new THREE.Color(0x040506);
+scene.background = FOG;
+scene.fog = new THREE.FogExp2(FOG, 0.045);
+const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.1, 220);
+
+/* ---------- environment: light cards for chrome reflections ---------- */
+function buildEnv() {
+  const env = new THREE.Scene();
+  env.background = new THREE.Color(0x000000);
+  const card = (w, h, pos, rot, k) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(1, 1, 1).multiplyScalar(k), side: THREE.DoubleSide }));
+    m.position.set(pos[0], pos[1], pos[2]); m.rotation.set(rot[0], rot[1], rot[2]); env.add(m);
+  };
+  card(18, 0.22, [0, 9, 0.6], [Math.PI / 2, 0, 0], 9);
+  card(18, 0.1, [0, 9, 3.4], [Math.PI / 2, 0, 0], 6);
+  card(0.16, 16, [-9, 2, 3], [0, Math.PI / 2, 0], 6);
+  card(0.16, 16, [9, 2, -1.5], [0, -Math.PI / 2, 0], 6);
+  card(0.08, 16, [-9, 2, -3.5], [0, Math.PI / 2, 0], 3);
+  card(6, 1.2, [0, 4, -11], [0, 0, 0], 0.5);
+  card(16, 0.08, [0, 0.35, 10], [0, Math.PI, 0], 3);
+  const pm = new THREE.PMREMGenerator(renderer);
+  const tex = pm.fromScene(env, 0, 0.1, 100).texture;
+  pm.dispose();
+  return tex;
+}
+const envTex = buildEnv();
+
+/* ---------- materials ---------- */
+const chrome = new THREE.MeshPhysicalMaterial({ color: 0xc9d1da, metalness: 1, roughness: 0.07, envMap: envTex, envMapIntensity: 1 });
+const floorMat = new THREE.MeshStandardMaterial({ color: 0x050607, metalness: 0.45, roughness: 0.3, envMap: envTex, envMapIntensity: 0.2 });
+const crowdMat = new THREE.MeshStandardMaterial({ color: 0x0a0b0e, metalness: 0, roughness: 0.85, envMap: envTex, envMapIntensity: 0.05 });
+
+/* ---------- set ---------- */
+const floor = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), floorMat);
+floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+const monolith = new THREE.Mesh(new RoundedBoxGeometry(2.2, 8, 0.9, 5, 0.08), chrome);
+monolith.position.set(0, 4, 0); monolith.castShadow = true; scene.add(monolith);
+
+const seamMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const seam = new THREE.Mesh(new THREE.BoxGeometry(0.035, 7.4, 0.02), seamMat);
+seam.position.set(0, 4, 0.458); scene.add(seam);
+
+const haloMat1 = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const haloMat2 = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const halo1 = new THREE.Mesh(new THREE.TorusGeometry(5.3, 0.03, 10, 240, Math.PI * 1.72), haloMat1);
+const halo2 = new THREE.Mesh(new THREE.TorusGeometry(5.95, 0.018, 8, 240, Math.PI * 1.15), haloMat2);
+halo1.position.set(0, 5.2, -2.4); halo2.position.copy(halo1.position); scene.add(halo1, halo2);
+
+const ringMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+const ring = new THREE.Mesh(new THREE.TorusGeometry(7.5, 0.028, 8, 256), ringMat);
+ring.rotation.x = -Math.PI / 2; ring.position.y = 0.03; scene.add(ring);
+
+/* seeded random */
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+/* crowd: tiny figures for scale */
+const CROWD_N = 110;
+const bodyGeo = new THREE.CapsuleGeometry(0.075, 0.26, 4, 8); bodyGeo.translate(0, 0.205, 0);
+const headGeo = new THREE.SphereGeometry(0.058, 10, 8); headGeo.translate(0, 0.49, 0);
+const bodies = new THREE.InstancedMesh(bodyGeo, crowdMat, CROWD_N);
+const heads = new THREE.InstancedMesh(headGeo, crowdMat, CROWD_N);
+const crowdSeeds = [];
+{
+  const r = rng(7);
+  for (let i = 0; i < CROWD_N; i++) {
+    const dist = 8.6 + r() * 6.8, ang = (r() - 0.5) * 1.3;
+    crowdSeeds.push({ x: Math.sin(ang) * dist, z: Math.cos(ang) * dist, s: 0.9 + r() * 0.25, lag: r(), rot: r() * 6.28 });
+  }
+}
+scene.add(bodies, heads);
+
+/* shards */
+const SH_N = 140;
+const shardGeo = new THREE.OctahedronGeometry(0.22, 0); shardGeo.scale(0.55, 1.6, 0.35);
+const shardMat = new THREE.MeshStandardMaterial({ color: 0xbfc7d0, metalness: 1, roughness: 0.2, envMap: envTex, envMapIntensity: 0.6 });
+const shards = new THREE.InstancedMesh(shardGeo, shardMat, SH_N);
+const shardSeeds = [];
+{
+  const r = rng(11);
+  for (let i = 0; i < SH_N; i++) shardSeeds.push({ r: 3.8 + r() * 2.8, h: 0.9 + r() * 7.6, ph: r() * 6.283, sp: 0.6 + r() * 0.8, hs: r(), sc: 0.6 + r() * 0.9, rx: r() * 6.28, ry: r() * 6.28, rz: r() * 6.28 });
+}
+scene.add(shards);
+
+/* lights */
+const key = new THREE.SpotLight(0xffffff, 0, 0, 0.3, 0.7, 2);
+key.position.set(5, 19, 11); key.target.position.set(0, 4, 0);
+key.castShadow = true; key.shadow.mapSize.set(1024, 1024); key.shadow.bias = -0.0004;
+const rimL = new THREE.SpotLight(0xffffff, 0, 0, 0.5, 0.8, 2);
+rimL.position.set(-6, 9, -9); rimL.target.position.set(0, 4.5, 0);
+const rimR = rimL.clone(); rimR.position.set(6, 9, -9); rimR.target = new THREE.Object3D(); rimR.target.position.set(0, 4.5, 0);
+scene.add(key, key.target, rimL, rimL.target, rimR, rimR.target, new THREE.HemisphereLight(0x8899aa, 0x050505, 0.05));
+
+/* beams: soft additive cones standing in for volumetric light */
+const BEAM_H = 24;
+const beamVS = `varying float vH; varying vec3 vN; varying vec3 vV; uniform float uH;
+void main(){ vH = clamp(position.z / uH, 0.0, 1.0); vec4 wp = modelMatrix * vec4(position,1.0);
+vN = normalize(mat3(modelMatrix) * normal); vV = cameraPosition - wp.xyz; gl_Position = projectionMatrix * viewMatrix * wp; }`;
+const beamFS = `uniform vec3 uColor; uniform float uI; uniform float uTime; varying float vH; varying vec3 vN; varying vec3 vV;
+void main(){ float facing = abs(dot(normalize(vN), normalize(vV))); float soft = pow(facing, 2.6) * smoothstep(2.0, 9.0, length(vV));
+float along = pow(1.0 - vH, 1.8) * smoothstep(0.0, 0.05, vH);
+float dust = 0.8 + 0.2 * sin(vH * 57.0 - uTime * 1.6 + vN.x * 7.0);
+gl_FragColor = vec4(uColor * uI * soft * along * dust, 1.0); }`;
+function makeBeam(radius) {
+  const g = new THREE.ConeGeometry(radius, BEAM_H, 48, 1, true);
+  g.translate(0, -BEAM_H / 2, 0); g.rotateX(-Math.PI / 2);
+  const m = new THREE.ShaderMaterial({ uniforms: { uColor: { value: new THREE.Color(1, 1, 1) }, uI: { value: 0 }, uTime: { value: 0 }, uH: { value: BEAM_H } },
+    vertexShader: beamVS, fragmentShader: beamFS, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const mesh = new THREE.Mesh(g, m); mesh.frustumCulled = false; scene.add(mesh); return mesh;
+}
+const FIX_X = [-7.5, -4.5, -1.5, 1.5, 4.5, 7.5];
+const beams = FIX_X.map(x => { const b = makeBeam(1.25); b.position.set(x, 15.5, -5.5); return b; });
+const BEAM_ORDER = [2, 3, 1, 4, 0, 5];
+const god = makeBeam(3.6); god.position.set(0, 21, 3);
+
+/* lasers */
+const LASER_N = 9;
+const laserGeo = new THREE.CylinderGeometry(0.02, 0.02, 1, 6, 1, true); laserGeo.translate(0, 0.5, 0); laserGeo.rotateX(Math.PI / 2);
+const laserMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+const lasers = [];
+for (let i = 0; i < LASER_N; i++) { const l = new THREE.Mesh(laserGeo, laserMat); l.position.set(0, 9.35, -2.9); l.scale.set(1, 1, 70); l.frustumCulled = false; scene.add(l); lasers.push(l); }
+
+/* dust motes */
+const P_N = 2600;
+const pGeo = new THREE.BufferGeometry();
+{
+  const r = rng(3), pos = new Float32Array(P_N * 3), seed = new Float32Array(P_N);
+  for (let i = 0; i < P_N; i++) { pos[i * 3] = (r() - 0.5) * 30; pos[i * 3 + 1] = r() * 14; pos[i * 3 + 2] = -10 + r() * 26; seed[i] = r(); }
+  pGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3)); pGeo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+}
+const pMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 }, uSize: { value: 1 }, uI: { value: 0.35 }, uSpark: { value: 0 } },
+  vertexShader: `uniform float uTime; uniform float uSize; uniform float uSpark; attribute float aSeed; varying float vA;
+void main(){ vec3 p = position; p.y = mod(position.y + uTime * (0.05 + 0.12 * aSeed), 14.0);
+p.x += sin(uTime * 0.11 + aSeed * 6.28) * 0.6; p.z += cos(uTime * 0.09 + aSeed * 12.0) * 0.5;
+vA = 0.35 + 0.65 * step(0.93, fract(aSeed * 97.0 + floor(uTime * 6.0) * 0.137)) * uSpark;
+vec4 mv = modelViewMatrix * vec4(p, 1.0); gl_PointSize = uSize * (0.5 + aSeed) * (16.0 / -mv.z); gl_Position = projectionMatrix * mv; }`,
+  fragmentShader: `uniform float uI; varying float vA; void main(){ float d = length(gl_PointCoord - 0.5); float a = smoothstep(0.5, 0.0, d); gl_FragColor = vec4(vec3(0.9, 0.95, 1.0) * a * vA * uI, 1.0); }`,
+  transparent: true, blending: THREE.AdditiveBlending, depthWrite: false
+});
+const motes = new THREE.Points(pGeo, pMat); motes.frustumCulled = false; scene.add(motes);
+
+/* ---------- post ---------- */
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(1280, 720), 0.9, 0.55, 0.85);
+composer.addPass(bloom);
+composer.addPass(new OutputPass());
+const finalPass = new ShaderPass({
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uFlash: { value: 0 }, uExposure: { value: 1 }, uGrain: { value: 0.045 }, uVignette: { value: 0.55 }, uCA: { value: 0.012 }, uContrast: { value: 0.35 } },
+  vertexShader: `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime, uFlash, uExposure, uGrain, uVignette, uCA, uContrast; varying vec2 vUv;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float ign(vec2 p){ return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+void main(){
+  vec2 d = vUv - 0.5; float r2 = dot(d, d); vec2 off = d * uCA * (0.4 + r2 * 3.0);
+  vec3 col = vec3(texture2D(tDiffuse, vUv + off).r, texture2D(tDiffuse, vUv).g, texture2D(tDiffuse, vUv - off).b);
+  col = clamp(col * uExposure, 0.0, 1.0);
+  col = max(col - 0.012 * uContrast / 0.45, 0.0) / (1.0 - 0.012 * uContrast / 0.45);
+  col = mix(col, col * col * (3.0 - 2.0 * col), uContrast);
+  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
+  col = mix(col, col * vec3(0.9, 0.97, 1.08), (1.0 - l) * 0.4 * (uContrast / 0.45));
+  col *= 1.0 - uVignette * smoothstep(0.08, 0.55, r2 * 1.6);
+  col = mix(col, vec3(1.0), clamp(uFlash, 0.0, 1.0));
+  float g = hash(gl_FragCoord.xy + floor(uTime * 24.0) * 17.31) - 0.5;
+  col += g * uGrain * (0.5 + 0.5 * (1.0 - l));
+  col += (ign(gl_FragCoord.xy + fract(uTime * 3.1) * 97.0) - 0.5) / 255.0;
+  gl_FragColor = vec4(col, 1.0);
+}`
+});
+composer.addPass(finalPass);
+
+/* ---------- sizing and the budget governor ---------- */
+let renderScale = 1, ema = 16.7, over = 0, under = 0;
+function resize() {
+  const w = Math.max(1, stage.clientWidth), h = Math.max(1, stage.clientHeight);
+  const pr = Math.min(window.devicePixelRatio || 1, 1.5) * renderScale;
+  renderer.setPixelRatio(pr); renderer.setSize(w, h, false);
+  composer.setPixelRatio(pr); composer.setSize(w, h);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+  pMat.uniforms.uSize.value = h * pr / 180;
+}
+function govern(dt) {
+  ema = ema * 0.92 + dt * 0.08;
+  if (ema > 22) { over++; under = 0; if (over > 40 && renderScale > 0.55) { renderScale *= 0.85; resize(); over = 0; } }
+  else if (ema < 13) { under++; over = 0; if (under > 240 && renderScale < 1) { renderScale = Math.min(1, renderScale * 1.12); resize(); under = 0; } }
+  else { over = 0; under = 0; }
+}
+new ResizeObserver(() => { resize(); if (!playing) drawFrame(); }).observe(stage);
+
+/* ---------- audio: a small synth that plays the score ---------- */
+const mtof = m => 440 * Math.pow(2, (m - 69) / 12);
+class Synth {
+  constructor() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    const ctx = this.ctx = new AC({ latencyHint: 'interactive' });
+    this.master = ctx.createGain(); this.master.gain.value = 0.8;
+    const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -16; comp.ratio.value = 3.5; comp.attack.value = 0.004; comp.release.value = 0.2;
+    this.master.connect(comp); comp.connect(ctx.destination);
+    this.noise = this.makeNoise(2);
+    this.reverb = ctx.createConvolver(); this.reverb.buffer = this.makeIR(2.8, 2.4);
+    this.rev = ctx.createGain(); this.rev.gain.value = 0.8; this.rev.connect(this.reverb); this.reverb.connect(this.master);
+    this.delay = ctx.createDelay(1.5); this.delay.delayTime.value = BEAT * 0.75;
+    const fb = ctx.createGain(); fb.gain.value = 0.33; this.delay.connect(fb); fb.connect(this.delay);
+    const dOut = ctx.createGain(); dOut.gain.value = 0.3; this.delay.connect(dOut); dOut.connect(this.master); dOut.connect(this.rev);
+    this.bassBus = ctx.createGain(); this.bassBus.connect(this.master);
+    this.padBus = ctx.createGain(); this.padBus.gain.value = 0.9; this.padBus.connect(this.master); this.padBus.connect(this.rev);
+    this.live = new Set(); this.timer = null; this.idx = 0; this.loopBase = 0; this.t0 = 0;
+  }
+  makeNoise(sec) { const c = this.ctx, b = c.createBuffer(1, Math.floor(c.sampleRate * sec), c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; return b; }
+  makeIR(sec, decay) { const c = this.ctx, len = Math.floor(c.sampleRate * sec), b = c.createBuffer(2, len, c.sampleRate); for (let ch = 0; ch < 2; ch++) { const d = b.getChannelData(ch); for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay); } return b; }
+  keep(n) { this.live.add(n); n.onended = () => this.live.delete(n); return n; }
+  src() { const n = this.ctx.createBufferSource(); n.buffer = this.noise; return this.keep(n); }
+  osc(type, f) { const o = this.ctx.createOscillator(); o.type = type; o.frequency.value = f; return this.keep(o); }
+  gain(v) { const g = this.ctx.createGain(); g.gain.value = v; return g; }
+  filt(type, f, q) { const b = this.ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q != null) b.Q.value = q; return b; }
+  kick(t, vel) {
+    const o = this.osc('sine', 150), g = this.gain(0.0001);
+    o.frequency.setValueAtTime(155, t); o.frequency.exponentialRampToValueAtTime(48, t + 0.1); o.frequency.exponentialRampToValueAtTime(40, t + 0.35);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel, t + 0.005); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.42);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.45);
+    const n = this.src(), hp = this.filt('highpass', 3000), ng = this.gain(0);
+    ng.gain.setValueAtTime(vel * 0.12, t); ng.gain.exponentialRampToValueAtTime(0.0005, t + 0.012);
+    n.connect(hp); hp.connect(ng); ng.connect(this.master); n.start(t, Math.random()); n.stop(t + 0.02);
+    for (const [bus, lo, hi, rel] of [[this.bassBus, 0.2, 1, 0.22], [this.padBus, 0.45, 0.9, 0.3]]) {
+      bus.gain.cancelScheduledValues(t); bus.gain.setValueAtTime(lo, t); bus.gain.linearRampToValueAtTime(hi, t + rel);
+    }
+  }
+  clap(t) {
+    const n = this.src(), bp = this.filt('bandpass', 1400, 0.9), g = this.gain(0);
+    for (let k = 0; k < 3; k++) { g.gain.setValueAtTime(0.5, t + k * 0.011); g.gain.exponentialRampToValueAtTime(0.05, t + k * 0.011 + 0.009); }
+    g.gain.setValueAtTime(0.42, t + 0.034); g.gain.exponentialRampToValueAtTime(0.001, t + 0.24);
+    const s = this.gain(0.35);
+    n.connect(bp); bp.connect(g); g.connect(this.master); g.connect(s); s.connect(this.rev); n.start(t, Math.random()); n.stop(t + 0.26);
+  }
+  hat(t, vel, open) {
+    const n = this.src(), hp = this.filt('highpass', 7800), g = this.gain(0);
+    g.gain.setValueAtTime(vel * 0.5, t); g.gain.exponentialRampToValueAtTime(0.0005, t + (open ? 0.2 : 0.045));
+    n.connect(hp); hp.connect(g); g.connect(this.master); n.start(t, Math.random()); n.stop(t + (open ? 0.22 : 0.06));
+  }
+  snare(t, vel) {
+    const n = this.src(), bp = this.filt('bandpass', 1900, 0.6), g = this.gain(0);
+    g.gain.setValueAtTime(vel * 0.45, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.13);
+    const o = this.osc('triangle', 185), og = this.gain(0);
+    og.gain.setValueAtTime(vel * 0.25, t); og.gain.exponentialRampToValueAtTime(0.0008, t + 0.08);
+    const s = this.gain(0.25);
+    n.connect(bp); bp.connect(g); g.connect(this.master); g.connect(s); s.connect(this.rev); o.connect(og); og.connect(this.master);
+    n.start(t, Math.random()); n.stop(t + 0.15); o.start(t); o.stop(t + 0.1);
+  }
+  bass(t, midi, durBeats) {
+    const f = mtof(midi), end = t + durBeats * BEAT;
+    const o = this.osc('sawtooth', f), sub = this.osc('sine', f), lp = this.filt('lowpass', 180, 6), g = this.gain(0.0001), sg = this.gain(0.6);
+    lp.frequency.setValueAtTime(180, t); lp.frequency.exponentialRampToValueAtTime(1100, t + 0.03); lp.frequency.exponentialRampToValueAtTime(220, end);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.38, t + 0.01); g.gain.setValueAtTime(0.38, end - 0.03); g.gain.exponentialRampToValueAtTime(0.0005, end);
+    o.connect(lp); lp.connect(g); sub.connect(sg); sg.connect(g); g.connect(this.bassBus);
+    o.start(t); sub.start(t); o.stop(end + 0.02); sub.stop(end + 0.02);
+  }
+  pad(t, notes, durBeats, vel) {
+    const end = t + durBeats * BEAT, lp = this.filt('lowpass', 800, 0.5), g = this.gain(0.0001);
+    lp.frequency.setValueAtTime(700, t); lp.frequency.linearRampToValueAtTime(1500, t + (end - t) * 0.5); lp.frequency.linearRampToValueAtTime(800, end);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vel * 0.13, t + 0.9); g.gain.setValueAtTime(vel * 0.13, end - 0.3); g.gain.linearRampToValueAtTime(0.0001, end + 1.2);
+    for (const n of notes) for (const det of [-8, 0, 8]) { const o = this.osc('sawtooth', mtof(n)); o.detune.value = det; o.connect(lp); o.start(t); o.stop(end + 1.3); }
+    lp.connect(g); g.connect(this.padBus);
+  }
+  stab(t, notes) {
+    const lp = this.filt('lowpass', 3000, 1), g = this.gain(0);
+    lp.frequency.setValueAtTime(3200, t); lp.frequency.exponentialRampToValueAtTime(600, t + 0.2);
+    g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.0008, t + 0.26);
+    for (const n of notes) for (const det of [-10, 10]) { const o = this.osc('sawtooth', mtof(n)); o.detune.value = det; o.connect(lp); o.start(t); o.stop(t + 0.3); }
+    lp.connect(g); g.connect(this.master); g.connect(this.delay); g.connect(this.rev);
+  }
+  lead(t, midi, durBeats, vel, soft) {
+    const end = t + durBeats * BEAT, f = mtof(midi);
+    const o = this.osc(soft ? 'triangle' : 'sawtooth', f), o2 = this.osc('sine', f * 2), lp = this.filt('lowpass', soft ? 2000 : 2800, 0.7), g = this.gain(0.0001);
+    const lfo = this.osc('sine', 5.2), lg = this.gain(4); lfo.connect(lg); lg.connect(o.detune);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vel * 0.16, t + 0.03); g.gain.setValueAtTime(vel * 0.16, end - 0.05); g.gain.exponentialRampToValueAtTime(0.0005, end + 0.35);
+    const g2 = this.gain(0.25); o2.connect(g2); g2.connect(lp); o.connect(lp); lp.connect(g); g.connect(this.master); g.connect(this.delay); g.connect(this.rev);
+    for (const x of [o, o2, lfo]) { x.start(t); x.stop(end + 0.4); }
+  }
+  riser(t, durBeats) {
+    const end = t + durBeats * BEAT, n = this.src(); n.loop = true;
+    const bp = this.filt('bandpass', 300, 4), g = this.gain(0.0001);
+    bp.frequency.setValueAtTime(300, t); bp.frequency.exponentialRampToValueAtTime(7000, end);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.2, end);
+    n.connect(bp); bp.connect(g); g.connect(this.master); g.connect(this.rev); n.start(t); n.stop(end + 0.02);
+    const o = this.osc('sawtooth', 110), lp = this.filt('lowpass', 2000), og = this.gain(0.0001);
+    o.frequency.setValueAtTime(110, t); o.frequency.exponentialRampToValueAtTime(880, end);
+    og.gain.setValueAtTime(0.0001, t); og.gain.exponentialRampToValueAtTime(0.05, end);
+    o.connect(lp); lp.connect(og); og.connect(this.master); o.start(t); o.stop(end + 0.02);
+  }
+  impact(t) {
+    const n = this.src(), hp = this.filt('highpass', 3500), g = this.gain(0);
+    g.gain.setValueAtTime(0.32, t); g.gain.exponentialRampToValueAtTime(0.001, t + 2.0);
+    n.connect(hp); hp.connect(g); g.connect(this.master); g.connect(this.rev); n.start(t); n.stop(t + 2.0);
+    const o = this.osc('sine', 60), og = this.gain(0);
+    o.frequency.setValueAtTime(62, t); o.frequency.exponentialRampToValueAtTime(34, t + 1.2);
+    og.gain.setValueAtTime(0.8, t); og.gain.exponentialRampToValueAtTime(0.001, t + 1.6);
+    o.connect(og); og.connect(this.master); o.start(t); o.stop(t + 1.65);
+  }
+  play(e, t) {
+    switch (e.type) {
+      case 'kick': this.kick(t, e.vel); break;
+      case 'clap': this.clap(t); break;
+      case 'hat': this.hat(t, e.vel, e.open); break;
+      case 'snare': this.snare(t, e.vel); break;
+      case 'bass': this.bass(t, e.note, e.dur); break;
+      case 'pad': this.pad(t, e.notes, e.dur, e.vel); break;
+      case 'stab': this.stab(t, e.notes); break;
+      case 'lead': this.lead(t, e.note, e.dur, e.vel, e.soft); break;
+      case 'riser': this.riser(t, e.dur); break;
+      case 'impact': this.impact(t); break;
+    }
+  }
+  start(fromBeat) {
+    for (const n of this.live) { try { n.stop(); } catch (err) { /* already stopped */ } }
+    this.live.clear();
+    for (const bus of [this.bassBus, this.padBus]) { bus.gain.cancelScheduledValues(0); bus.gain.value = bus === this.padBus ? 0.9 : 1; }
+    const now = this.ctx.currentTime + 0.06;
+    this.t0 = now - fromBeat * BEAT; this.loopBase = 0;
+    this.idx = C.EV.findIndex(e => e.b >= fromBeat - 1e-6); if (this.idx < 0) this.idx = 0;
+    for (let i = C.EV.length - 1; i >= 0; i--) {
+      const e = C.EV[i];
+      if (e.type === 'pad' && e.b < fromBeat && e.b + e.dur > fromBeat) { this.pad(now, e.notes, e.b + e.dur - fromBeat, e.vel); break; }
+    }
+    if (!this.timer) this.timer = setInterval(() => this.tick(), 25);
+    this.tick();
+  }
+  tick() {
+    const horizon = this.ctx.currentTime + 0.14;
+    for (;;) {
+      if (this.idx >= C.EV.length) { this.idx = 0; this.loopBase += C.TOTAL_BEATS; }
+      const e = C.EV[this.idx], t = this.t0 + (e.b + this.loopBase) * BEAT;
+      if (t > horizon) break;
+      if (t >= this.ctx.currentTime - 0.02) this.play(e, t);
+      this.idx++;
+    }
+  }
+  latency() { return (this.ctx.outputLatency || 0) + (this.ctx.baseLatency || 0); }
+  beatNow() { return (this.ctx.currentTime - this.latency() - this.t0) / BEAT; }
+}
+
+/* ---------- state → scene ---------- */
+let mode = 'directed', strobeOn = !reduceMotion, playing = false, synth = null, muted = false;
+const POSTER_BEAT = 17.25 * 4;
+const hsl = (h, s, l) => { const c = new THREE.Color().setHSL(h, s, l); return [c.r, c.g, c.b]; };
+function reactive(S) {
+  const k = S.kick, h = S.hat, hue = (S.x * 0.015) % 1, c1 = hsl(hue, 1, 0.5), c2 = hsl((hue + 0.33) % 1, 1, 0.5), c3 = hsl((hue + 0.66) % 1, 1, 0.5);
+  Object.assign(S, {
+    cam: { p: [Math.sin(S.x * 0.02) * 16, 3, Math.cos(S.x * 0.02) * 16], l: [0, 4, 0], f: 40 },
+    key: 0.6 + 0.6 * k, rim: 1.0, rimColor: c1, env: 0.8, fog: 0.0, exposure: 0.9 + 0.25 * k, bloom: 1,
+    flash: strobeOn ? 0.2 * Math.exp(-(S.x % 2) / 0.1) : 0, god: 0.35, beamCount: 6, beams: 0.45 + 0.4 * k, spread: 0.5 + 0.5 * Math.sin(S.x * 1.3), sweep: Math.sin(S.x * 0.9), beamColor: c2,
+    lasers: 0.8 + h, laserFan: 0.3 + 0.25 * Math.sin(S.x * 2.1), laserColor: c3,
+    seam: 2 + 4 * k, seamGrow: 1, halo: 0.9 + 1.2 * k, haloColor: c1, ring: 0.8 + k, ringColor: c2, haloSpin: S.x * 0.2,
+    shardScale: 1 + 0.6 * k, dissolve: 0.25 * h, radius: 1 + 0.3 * k, crowd: 1, spark: 1, dust: 0.6, monoScale: 1 + 0.22 * k, haloScale: 1 + 0.25 * k, flat: true
+  });
+  return S;
+}
+const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), eul = new THREE.Euler(), v3 = new THREE.Vector3(), s3 = new THREE.Vector3(), tgt = new THREE.Vector3();
+function setRGB(mat, rgb, k) { mat.color.setRGB(rgb[0] * k, rgb[1] * k, rgb[2] * k); }
+function apply(S) {
+  const tSec = S.x * BEAT;
+  camera.position.set(S.cam.p[0], S.cam.p[1], S.cam.p[2]); camera.lookAt(S.cam.l[0], S.cam.l[1], S.cam.l[2]);
+  if (camera.fov !== S.cam.f) { camera.fov = S.cam.f; camera.updateProjectionMatrix(); }
+  scene.fog.density = S.fog;
+  chrome.envMapIntensity = 0.2 + 0.8 * S.env; shardMat.envMapIntensity = 0.1 + 0.45 * S.env; floorMat.envMapIntensity = 0.05 + 0.2 * S.env;
+  key.intensity = S.key * 700; rimL.intensity = rimR.intensity = S.rim * 600;
+  rimL.color.setRGB(S.rimColor[0], S.rimColor[1], S.rimColor[2]); rimR.color.copy(rimL.color);
+  const ms = S.monoScale || 1; monolith.scale.y = ms; monolith.position.y = 4 * ms; seam.position.y = 4 * ms;
+  seam.visible = S.seam > 0.01; seam.scale.y = Math.max(0.001, S.seamGrow) * ms; setRGB(seamMat, [1, 0.97, 0.95], S.seam);
+  const hs = S.haloScale || 1; halo1.scale.setScalar(hs); halo2.scale.setScalar(hs);
+  halo1.visible = halo2.visible = S.halo > 0.01; setRGB(haloMat1, S.haloColor, S.halo * 1.1); setRGB(haloMat2, S.haloColor, S.halo * 0.55);
+  halo1.rotation.z = S.haloSpin; halo2.rotation.z = -S.haloSpin * 1.4 + 1.1;
+  ring.visible = S.ring > 0.01; setRGB(ringMat, S.ringColor, S.ring * 1.3);
+  beams.forEach((b, i) => {
+    const on = BEAM_ORDER.indexOf(i) < S.beamCount && S.beams > 0.01; b.visible = on; if (!on) return;
+    const x = FIX_X[i], sp = S.spread;
+    tgt.set((x * 1.7 + S.sweep * 4.5) * sp, 3.8 * (1 - sp), 0.4 * (1 - sp) + (2.5 + 3 * Math.abs(x) / 7.5) * sp);
+    b.lookAt(tgt); b.material.uniforms.uI.value = S.beams * (S.flat ? 0.12 : 0.085); b.material.uniforms.uTime.value = tSec;
+    b.material.uniforms.uColor.value.setRGB(S.beamColor[0], S.beamColor[1], S.beamColor[2]);
+  });
+  god.visible = S.god > 0.01; god.lookAt(0, 0, 0.6); god.material.uniforms.uI.value = S.god * 0.12; god.material.uniforms.uTime.value = tSec;
+  god.material.uniforms.uColor.value.setRGB(0.8, 0.88, 1);
+  const lOn = S.lasers > 0.01;
+  lasers.forEach((l, j) => {
+    l.visible = lOn; if (!lOn) return;
+    const a = (j / (LASER_N - 1) - 0.5) * 2 * S.laserFan;
+    tgt.set(Math.tan(a) * 40, 0.4 + (j % 2) * 1.1 + Math.sin(S.x * 0.5 + j) * 0.5, 40); l.lookAt(tgt);
+  });
+  setRGB(laserMat, S.laserColor, S.lasers * 2.6);
+  shards.visible = S.shardScale > 0.01;
+  if (shards.visible) {
+    for (let i = 0; i < SH_N; i++) {
+      const sd = shardSeeds[i], a = sd.ph + S.orbit * sd.sp * 2.0, r = sd.r * S.radius, d = S.dissolve;
+      let px = Math.cos(a) * r, pz = Math.sin(a) * r, py = sd.h + Math.sin(a * 2 + sd.ph) * 0.25;
+      if (d > 0) { px += px * 1.4 * d + Math.sin(sd.ph * 3 + S.x * 0.05) * 1.2 * d; pz += pz * 1.4 * d + Math.cos(sd.ph * 5 + S.x * 0.04) * 1.2 * d; py += d * (1.5 + 3.5 * sd.hs) + Math.sin(S.x * 0.1 + sd.ph) * 0.5 * d; }
+      v3.set(px, py, pz); eul.set(sd.rx + S.x * 0.05 * sd.sp, sd.ry + S.x * 0.07, sd.rz); q.setFromEuler(eul);
+      const sc = S.shardScale * sd.sc; s3.set(sc, sc, sc); m4.compose(v3, q, s3); shards.setMatrixAt(i, m4);
+    }
+    shards.instanceMatrix.needsUpdate = true;
+  }
+  for (let i = 0; i < CROWD_N; i++) {
+    const c = crowdSeeds[i], bob = S.crowd * 0.06 * Math.max(0, S.kick - 0.15 * c.lag);
+    v3.set(c.x, bob, c.z); eul.set(0, c.rot, 0); q.setFromEuler(eul); s3.set(c.s, c.s, c.s); m4.compose(v3, q, s3);
+    bodies.setMatrixAt(i, m4); heads.setMatrixAt(i, m4);
+  }
+  bodies.instanceMatrix.needsUpdate = true; heads.instanceMatrix.needsUpdate = true;
+  pMat.uniforms.uTime.value = tSec; pMat.uniforms.uI.value = S.dust * 0.55; pMat.uniforms.uSpark.value = S.spark * S.hat;
+  bloom.strength = S.flat ? 1.1 : S.bloom * 0.6; bloom.threshold = S.flat ? 0.6 : 1.0; bloom.radius = S.flat ? 0.8 : 0.4;
+  renderer.toneMapping = S.flat ? THREE.NoToneMapping : THREE.AgXToneMapping;
+  const u = finalPass.uniforms;
+  u.uTime.value = tSec; u.uFlash.value = S.flash; u.uExposure.value = S.exposure;
+  u.uGrain.value = S.flat ? 0 : 0.045; u.uVignette.value = S.flat ? 0 : 0.55; u.uCA.value = S.flat ? 0 : 0.0045; u.uContrast.value = S.flat ? 0 : 0.45;
+}
+
+/* ---------- HUD and loop ---------- */
+const hudEls = { sec: $('hudSec'), pos: $('hudPos'), shot: $('hudShot'), cut: $('hudNextCut'), nsec: $('hudNextSec'), bl: $('hudBL') };
+let hudTick = 0;
+function updateHud(x) {
+  const H = C.hud(x);
+  hudEls.sec.textContent = H.section + ' · ' + H.label; hudEls.sec.classList.toggle('drop', H.isDrop);
+  hudEls.pos.textContent = H.pos;
+  hudEls.shot.textContent = mode === 'directed' ? H.shot : 'Shot: constant orbit';
+  hudEls.cut.textContent = mode === 'directed' ? H.nextCut : 'Next cut: none';
+  hudEls.nsec.textContent = H.nextSec; hudEls.nsec.classList.toggle('drop', H.nextIsDrop);
+  const lat = synth ? Math.round(synth.latency() * 1000) : 0;
+  hudEls.bl.textContent = 'render ' + renderScale.toFixed(2) + '× · ' + ema.toFixed(1) + ' ms · A/V comp ' + lat + ' ms';
+  C.setPlayhead(x);
+}
+function currentBeat() { return playing && synth ? synth.beatNow() : POSTER_BEAT; }
+function drawFrame() {
+  const x = currentBeat();
+  let S = C.state(x, { strobe: strobeOn });
+  if (mode === 'reactive') S = reactive(S);
+  apply(S);
+  composer.render();
+  if ((hudTick++ % 3) === 0 || !playing) updateHud(x);
+}
+let raf = 0, last = 0, visible = true;
+function loop(now) {
+  raf = 0;
+  if (last) govern(now - last); last = now;
+  drawFrame();
+  if (playing && visible) raf = requestAnimationFrame(loop);
+}
+function kick() { if (!raf && playing && visible) { last = 0; raf = requestAnimationFrame(loop); } }
+new IntersectionObserver(entries => { visible = entries[0].isIntersecting; kick(); }, { threshold: 0.05 }).observe(stage);
+
+/* ---------- controls ---------- */
+const btnPlay = $('btnPlay'), btnDir = $('btnDirected'), btnRe = $('btnReactive'), btnStrobe = $('btnStrobe'), btnMute = $('btnMute');
+function setStrobeLabel() { btnStrobe.setAttribute('aria-pressed', String(strobeOn)); btnStrobe.textContent = strobeOn ? 'Strobe on' : 'Strobe off'; }
+setStrobeLabel();
+async function startAt(beat) {
+  if (!synth) synth = new Synth();
+  if (synth.ctx.state !== 'running') await synth.ctx.resume();
+  synth.start(beat);
+  playing = true; $('poster').hidden = true; btnPlay.textContent = 'Pause'; kick();
+}
+btnPlay.addEventListener('click', async () => {
+  if (!synth) { await startAt(0); return; }
+  if (playing) { playing = false; await synth.ctx.suspend(); btnPlay.textContent = 'Resume'; }
+  else { await synth.ctx.resume(); playing = true; btnPlay.textContent = 'Pause'; kick(); }
+});
+C.onSeek = beat => { startAt(beat); };
+function setMode(m) { mode = m; btnDir.setAttribute('aria-pressed', String(m === 'directed')); btnRe.setAttribute('aria-pressed', String(m === 'reactive')); if (!playing) drawFrame(); }
+btnDir.addEventListener('click', () => setMode('directed'));
+btnRe.addEventListener('click', () => setMode('reactive'));
+btnStrobe.addEventListener('click', () => { strobeOn = !strobeOn; setStrobeLabel(); if (!playing) drawFrame(); });
+btnMute.addEventListener('click', () => { muted = !muted; btnMute.setAttribute('aria-pressed', String(muted)); btnMute.textContent = muted ? 'Unmute' : 'Mute'; if (synth) synth.master.gain.value = muted ? 0 : 0.8; });
+
+/* ---------- first frame ---------- */
+window.__colossusRender = beat => { const S = C.state(beat, { strobe: strobeOn }); apply(mode === 'reactive' ? reactive(S) : S); composer.render(); updateHud(beat); };
+window.__colossusMode = m => setMode(m);
+resize();
+fallback.hidden = true;
+['hudTL', 'hudTR', 'hudBL', 'poster'].forEach(id => { $(id).hidden = false; });
+drawFrame();
+</script>
+
+</body></html>
